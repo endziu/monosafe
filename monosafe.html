@@ -13,7 +13,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     <meta charset="utf-8" />
     <title>MonoSafe</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
+    <style id="page-style">
         * { box-sizing: border-box; }
         html { min-height: 100%; background: #0f1115; color-scheme: dark; }
         body {
@@ -90,7 +90,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         <h1>MonoSafe</h1>
         <p class="intro muted">Encrypt a file or text message into a self-decrypting HTML file.</p>
         <noscript>JavaScript is required to encrypt files and messages.</noscript>
-        <form action="javascript:;" style="display:none">
+        <form id="encrypt-form" style="display:none">
             <fieldset class="source-options" aria-label="Content to encrypt">
                 <label class="muted"><input type="radio" id="source-file" name="source" value="file" checked>File</label>
                 <label class="muted"><input type="radio" id="source-message" name="source" value="message">Text message</label>
@@ -105,7 +105,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             </div>
             <div class="password-field">
                 <input type="password" class="field" id="password" aria-label="Password" placeholder="Password" autocomplete="new-password" aria-describedby="password-strength-status" required>
-                <button type="button" class="muted password-toggle" aria-label="Show password" aria-controls="password" aria-pressed="false" onclick="togglePasswordVisibility(this)">
+                <button type="button" class="muted password-toggle" aria-label="Show password" aria-controls="password" aria-pressed="false" id="password-toggle">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
                         <circle cx="12" cy="12" r="3" />
@@ -124,7 +124,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             </div>
             <div class="password-field">
                 <input type="password" class="field" id="password_repeated" aria-label="Repeat password" placeholder="Repeat password" autocomplete="new-password" aria-describedby="password-match-status" required>
-                <button type="button" class="muted password-toggle" aria-label="Show repeated password" aria-controls="password_repeated" aria-pressed="false" onclick="togglePasswordVisibility(this)">
+                <button type="button" class="muted password-toggle" aria-label="Show repeated password" aria-controls="password_repeated" aria-pressed="false" id="password-repeated-toggle">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
                         <circle cx="12" cy="12" r="3" />
@@ -142,9 +142,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 <label class="visually-hidden" for="password_hint">Password hint</label>
                 <textarea class="field" id="password_hint" rows="2" placeholder="A reference to something only we would know"></textarea>
             </details>
-            <input type="submit" value="Encrypt file">
+            <input id="encrypt-button" type="submit" value="Encrypt file">
         </form>
-        <p class="status" role="status" aria-live="polite"></p>
+        <p id="encrypt-status" class="status" role="status" aria-live="polite"></p>
     </main>
     <script>
         'use strict';
@@ -158,6 +158,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             button.setAttribute('aria-label', (visible ? 'Hide ' : 'Show ') + label);
         }
 
+        for (const id of ['password-toggle', 'password-repeated-toggle']) {
+            const button = document.getElementById(id);
+            button.addEventListener('click', () => togglePasswordVisibility(button));
+        }
+
         // A lightweight complexity estimate, not a prediction of cracking time.
         function passwordStrength(password) {
             if (!password.length) return 'empty';
@@ -166,6 +171,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             // also catches concatenated patterns and incomplete final repetitions.
             const patternText = normalized.replace(/[\s!.,_-]+/g, '');
             let remaining = patternText;
+            // Keep the second numeric pass: deletions can create new runs
+            // whose scan position has already passed (e.g. 12567834 -> 1234).
             const sequences = ['abcdefghijklmnopqrstuvwxyz', '01234567890', '09876543210',
                 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
             for (const sequence of sequences) {
@@ -177,9 +184,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                     }
                 }
             }
-            remaining = remaining.replace(/[013457@$!]/g, character => ({
+            remaining = remaining.replace(/[013457@$]/g, character => ({
                 '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't',
-                '@': 'a', '$': 's', '!': 'i'
+                '@': 'a', '$': 's'
             })[character]).replace(/password|letmein|welcome|admin|qwerty|iloveyou/g, '');
             let previous;
             do {
@@ -229,7 +236,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         window.addEventListener('pageshow', updatePasswordStrength);
         updatePasswordStrength();
 
-        document.querySelector('form').addEventListener('reset', () => {
+        document.getElementById('encrypt-form').addEventListener('reset', () => {
             setTimeout(() => {
                 updatePasswordStrength();
                 updatePasswordMatch();
@@ -255,16 +262,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         }
 
         function readFile(file) {
-            return new Uint8Array(new FileReader().readAsArrayBuffer(file));
-        }
-
-        function readFile(file) {
             const reader = new FileReader();
 
             return new Promise((resolve, reject) => {
                 reader.onerror = () => {
-                    reader.abort();
-                    reject(new DOMException('Cannot read input file.'));
+                    reject(reader.error || new DOMException('Cannot read input file.'));
                 };
 
                 reader.onload = () => {
@@ -274,7 +276,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             });
         };
 
-        function preprendFilename(filename, data_bytes) {
+        function prependFilename(filename, data_bytes) {
             const filename_bytes = new TextEncoder('utf-8').encode(filename + '/');
             const combined_bytes = new Uint8Array(filename_bytes.length + data_bytes.length);
             combined_bytes.set(filename_bytes, 0);
@@ -405,7 +407,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         }
 
         function runEncrypt() {
-            const status = document.querySelector('.status');
+            const status = document.getElementById('encrypt-status');
             status.textContent = '';
 
             if (window.isSecureContext === false) {
@@ -439,7 +441,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             }
             const hint = document.getElementById('password_hint').value.trim();
 
-            const encryptButton = document.querySelector('input[type=submit]');
+            const encryptButton = document.getElementById('encrypt-button');
             encryptButton.disabled = true;
             encryptButton.value = 'Encrypting…';
 
@@ -452,13 +454,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 : readFile(file);
 
             content
-                .then(content_bytes => preprendFilename(filename, content_bytes))
+                .then(content_bytes => prependFilename(filename, content_bytes))
                 .then(payload_bytes => deriveKey(password, salt)
                     .then(key => encrypt(key, iv, payload_bytes)))
                 .then(buffer => serialize(salt, iv, buffer, hint))
                 .then(buffer => download(filename + '.html', buffer))
                 .catch(e => {
-                    status.textContent = 'Encryption failed: ' + e.message;
+                    status.textContent = 'Encryption failed: ' + (e.message || e.name);
                 })
                 .finally(() => {
                     encryptButton.disabled = false;
@@ -466,11 +468,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 });
         }
 
-        document.querySelector('form').addEventListener('submit', e => {
+        document.getElementById('encrypt-form').addEventListener('submit', e => {
             e.preventDefault();
             runEncrypt();
         });
-        document.querySelector('form').style.display = 'grid';
+        document.getElementById('encrypt-form').style.display = 'grid';
 
         const DECRYPTOR_TEMPLATE =
             `
@@ -481,7 +483,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     <meta charset="utf-8" />
     <title>MonoSafe</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>${document.querySelector('style').textContent}</style>
+    <style>${document.getElementById('page-style').textContent}</style>
 </head>
 
 <body>
@@ -489,12 +491,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         <h1>MonoSafe</h1>
         <p class="intro muted">Enter the password to decrypt this file.</p>
         <noscript>JavaScript is required to decrypt files.</noscript>
-        <form action="javascript:;" style="display:none">
+        <form id="decrypt-form" style="display:none">
             <input id="password" class="field" type="password" aria-label="Password" placeholder="Password" autocomplete="current-password" aria-describedby="password-hint" autofocus>
             <p class="password-hint muted" id="password-hint" hidden></p>
-            <input type="submit" value="Decrypt file">
+            <input id="decrypt-button" type="submit" value="Decrypt file">
         </form>
-        <p class="status" role="status" aria-live="polite"></p>
+        <p id="decrypt-status" class="status" role="status" aria-live="polite"></p>
     </main>
     <script id="data" type="application/json">
         {{___PAYLOAD___}}
@@ -591,7 +593,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         }
 
         function runDecrypt() {
-            var status = document.querySelector('.status');
+            var status = document.getElementById('decrypt-status');
             status.textContent = '';
 
             if (window.isSecureContext === false) {
@@ -603,7 +605,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 return;
             }
 
-            var decryptButton = document.querySelector('input[type=submit]');
+            var decryptButton = document.getElementById('decrypt-button');
             decryptButton.disabled = true;
             decryptButton.value = 'Decrypting…';
 
@@ -614,7 +616,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                     var iv = new Uint8Array(data.iv);
                     var encrypted = base64ToArray(data.encrypted);
 
-                    var password = document.querySelector('input[type=password]').value;
+                    var password = document.getElementById('password').value;
                     return deriveKey(password, salt).then(function (key) {
                         return decrypt(key, iv, encrypted);
                     });
@@ -634,11 +636,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             }, 0);
         }
 
-        document.querySelector('form').addEventListener('submit', function(e) {
+        document.getElementById('decrypt-form').addEventListener('submit', function(e) {
             e.preventDefault();
             runDecrypt();
         });
-        document.querySelector('form').style.display = 'grid';
+        document.getElementById('decrypt-form').style.display = 'grid';
     <\/script>
 </body>
 

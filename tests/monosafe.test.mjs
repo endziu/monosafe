@@ -14,14 +14,22 @@ function page(html, secret = password, repeated = secret, options = {}) {
         const listeners = {};
         return Object.assign(properties, {
             addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
-            dispatch(type) { for (const callback of listeners[type] || []) callback(); }
+            dispatch(type, event) { for (const callback of listeners[type] || []) callback(event); },
+            getAttribute(name) { return this[name]; },
+            setAttribute(name, value) { this[name] = value; }
         });
     }
     const status = { textContent: '' };
     const button = { disabled: false, value: html.includes('id="data"') ? 'Decrypt file' : 'Encrypt file' };
     const form = eventTarget({ style: {} });
     const fields = {
-        password: eventTarget({ value: secret }),
+        password: eventTarget({ value: secret, id: 'password', type: 'password' }),
+        'password-toggle': eventTarget({ 'aria-controls': 'password' }),
+        'password-repeated-toggle': eventTarget({ 'aria-controls': 'password_repeated' }),
+        'encrypt-form': form, 'decrypt-form': form,
+        'encrypt-button': button, 'decrypt-button': button,
+        'encrypt-status': status, 'decrypt-status': status,
+        'page-style': { textContent: '' },
         password_hint: { value: options.hint || '' },
         'source-file': eventTarget({ checked: options.source !== 'message' }),
         'source-message': eventTarget({ checked: options.source === 'message' }),
@@ -29,7 +37,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
         'message-source': { hidden: true },
         message: { value: options.message || '' },
         'password-hint': { textContent: '', hidden: true },
-        'password-strength': { dataset: {} }, 'password-strength-label': { textContent: 'password strength', setAttribute(name, value) { this[name] = value; } }, password_repeated: eventTarget({ value: repeated }),
+        'password-strength': { dataset: {} }, 'password-strength-label': { textContent: 'password strength', setAttribute(name, value) { this[name] = value; } }, password_repeated: eventTarget({ value: repeated, id: 'password_repeated', type: 'password' }),
         'password-strength-status': { textContent: '' },
         'password-match-status': { textContent: '' },
         'password-match': { dataset: {} },
@@ -59,15 +67,25 @@ function page(html, secret = password, repeated = secret, options = {}) {
             })
         }, ...options.window }),
         document: {
-            getElementById: id => fields[id],
+            getElementById: id => {
+                const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '<script>');
+                assert.ok(html.includes(`id="${id}"`) && (id === 'data' || markup.includes(`id="${id}"`)), `element #${id} exists in markup`);
+                return fields[id];
+            },
             querySelector: selector => ({
                 '.status': status, 'input[type=submit]': button, form,
                 'input[type=password]': fields.password, style: { textContent: '' }
             })[selector]
         },
         FileReader: class {
+            abort() { this.error = null; }
             readAsArrayBuffer() {
                 reads++;
+                if (Object.hasOwn(options, 'readError')) {
+                    this.error = options.readError;
+                    this.onerror();
+                    return;
+                }
                 this.result = (options.bytes || bytes).buffer;
                 this.onload();
             }
@@ -80,7 +98,11 @@ function page(html, secret = password, repeated = secret, options = {}) {
     return {
         context, status, button, fields, form, downloads, derivations, timerErrors, get reads() { return reads; },
         async run(name) {
-            context[name]();
+            if (name === 'submit') {
+                let prevented = false;
+                form.dispatch('submit', { preventDefault() { prevented = true; } });
+                assert.ok(prevented, 'form submission prevents navigation');
+            } else context[name]();
             const deadline = Date.now() + 10000;
             while (button.disabled && !timerErrors.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
             assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
@@ -115,6 +137,21 @@ test('blank passwords are rejected before file reading or key derivation', async
     assert.equal(encryptor.downloads.length, 0);
 });
 
+test('file-read failures preserve diagnostics and restore the encrypt button', async () => {
+    for (const [readError, detail] of [
+        [new DOMException('The file is no longer accessible.', 'NotReadableError'), 'The file is no longer accessible.'],
+        [new DOMException('', 'NotReadableError'), 'NotReadableError'],
+        [null, 'Cannot read input file.']
+    ]) {
+        const encryptor = page(source, password, password, { readError });
+        await encryptor.run('runEncrypt');
+        assert.equal(encryptor.status.textContent, 'Encryption failed: ' + detail);
+        assert.equal(encryptor.button.value, 'Encrypt file');
+        assert.equal(encryptor.derivations.length, 0);
+        assert.equal(encryptor.downloads.length, 0);
+    }
+});
+
 test('both encryption password inputs are required', () => {
     for (const id of ['password', 'password_repeated']) {
         assert.match(source.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))[0], /\brequired\b/);
@@ -127,6 +164,44 @@ test('mismatched passwords are rejected before reading', async () => {
     assert.match(encryptor.status.textContent, /Passwords must match/);
     assert.equal(encryptor.reads, 0);
     assert.equal(encryptor.downloads.length, 0);
+});
+
+test('creator and generated decryptor markup contain no inline behavior', async () => {
+    for (const html of [source, await artifact()]) {
+        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        assert.doesNotMatch(markup, /\son\w+\s*=/i);
+        assert.doesNotMatch(markup, /\saction\s*=\s*["']\s*javascript:/i);
+    }
+});
+
+test('password toggle clicks affect only the controlled input and preserve values', () => {
+    const { fields } = page(source);
+    for (const [id, inputId, otherId, label] of [
+        ['password-toggle', 'password', 'password_repeated', 'password'],
+        ['password-repeated-toggle', 'password_repeated', 'password', 'repeated password']
+    ]) {
+        const toggle = fields[id];
+        for (const [type, pressed, action] of [['text', 'true', 'Hide'], ['password', 'false', 'Show']]) {
+            toggle.dispatch('click');
+            assert.equal(fields[inputId].type, type);
+            assert.equal(fields[inputId].value, password);
+            assert.equal(fields[otherId].type, 'password');
+            assert.equal(toggle.getAttribute('aria-pressed'), pressed);
+            assert.equal(toggle.getAttribute('aria-label'), action + ' ' + label);
+        }
+    }
+});
+
+test('form submissions encrypt and decrypt without navigating', async () => {
+    const encryptor = page(source);
+    assert.equal(encryptor.form.style.display, 'grid');
+    await encryptor.run('submit');
+    assert.equal(encryptor.downloads.length, 1);
+    assert.equal(encryptor.downloads[0][0], filename + '.html');
+    const decryptor = page(new TextDecoder().decode(encryptor.downloads[0][1]));
+    assert.equal(decryptor.form.style.display, 'grid');
+    await decryptor.run('submit');
+    assertRecovered(decryptor);
 });
 
 test('new artifacts use stronger PBKDF2 and preserve filename and binary bytes', async () => {
@@ -281,7 +356,8 @@ test('strength estimates reject sequences, truncated repetitions and combined co
         'myname19851985myname', 'abcdefghij', 'zyxwvutsrqponmlkjihgf',
         '9876543210jihgfedcba', 'qwertyuiopasdfghjkl', 'poiuytrewqlkjhgfdsa',
         'sunflowerSUNFLOWERsun', 'welcome123admin456', 'P@ssword1P@ssword1Pa',
-        'abcd-efgh-ijkl-mnop', 'ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴ'
+        'abcd-efgh-ijkl-mnop', 'ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴ',
+        '12567834vxq'
     ]) assert.equal(context.passwordStrength(value), 'low', value);
 });
 
@@ -411,7 +487,7 @@ test('empty file content and malformed decrypted headers are handled', async () 
     assert.equal(emptyFile.content.length, 0);
     // Exercise extraction failure after real, successful authenticated decryption.
     const encryptor = page(source);
-    encryptor.context.preprendFilename = () => new TextEncoder().encode('missing separator');
+    encryptor.context.prependFilename = () => new TextEncoder().encode('missing separator');
     await encryptor.run('runEncrypt');
     const invalid = page(new TextDecoder().decode(encryptor.downloads[0][1]));
     await invalid.run('runDecrypt');
