@@ -11,7 +11,7 @@ const containerNamePattern = /^monosafe-[0-9a-f]{32}\.html$/;
 const password = ' long unique test passphrase 🔐 ';
 
 function page(html, secret = password, repeated = secret, options = {}) {
-    const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    const markup = markupOf(html);
     function attributes(id) {
         const tag = markup.match(new RegExp(`<[^>]+\\bid="${id}"[^>]*>`));
         return Object.fromEntries([...(tag?.[0] || '').matchAll(/([\w-]+)="([^"]*)"/g)]
@@ -21,7 +21,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
         const listeners = {};
         return Object.assign(properties, {
             addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
-            dispatch(type, event) { for (const callback of listeners[type] || []) callback(event); },
+            dispatch(type, event) { for (const callback of listeners[type] || []) callback.call(this, event); },
             getAttribute(name) { return this[name]; },
             setAttribute(name, value) { this[name] = value; }
         });
@@ -48,7 +48,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
         'encrypt-form': form, 'decrypt-form': form,
         'encrypt-button': button, 'decrypt-button': button,
         'encrypt-status': status, 'decrypt-status': status,
-        'page-style': { textContent: html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)?.[1] || '' },
+        'page-style': { textContent: stylesheet(html) },
         password_hint: { value: options.hint || '' },
         'source-file': eventTarget({ checked: options.source !== 'message' }),
         'source-message': eventTarget({ checked: options.source === 'message' }),
@@ -135,7 +135,6 @@ function page(html, secret = password, repeated = secret, options = {}) {
                 return anchor;
             },
             getElementById: id => {
-                const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '<script>');
                 assert.ok(html.includes(`id="${id}"`) && (id === 'data' || markup.includes(`id="${id}"`)), `element #${id} exists in markup`);
                 return fields[id];
             },
@@ -225,13 +224,13 @@ test('status announces progress before key derivation and download start after, 
 
 test('operation feedback stays in a persistent atomic live region on both pages', async () => {
     for (const html of [source, await artifact()]) {
-        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const markup = markupOf(html);
         const region = markup.match(/<p\b[^>]*id="(?:encrypt|decrypt)-status"[^>]*>/)[0];
         assert.match(region, /role="status"/);
         assert.match(region, /aria-live="polite"/);
         assert.match(region, /aria-atomic="true"/);
         assert.doesNotMatch(region, /\bhidden\b|aria-hidden|style=/);
-        const css = markup.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)[1];
+        const css = stylesheet(markup);
         for (const [, declarations] of css.matchAll(/\.status(?::empty)?\s*\{([^}]+)\}/g)) {
             assert.doesNotMatch(declarations, /display:\s*none|visibility:\s*hidden/);
         }
@@ -254,7 +253,7 @@ test('primary button text meets AA contrast in both stylesheets, including hover
         return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
     }
     for (const html of [source, await artifact()]) {
-        const css = html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)[1];
+        const css = stylesheet(html);
         const normal = css.match(/input\[type=submit\]\s*\{([^}]+)\}/)[1];
         const foreground = normal.match(/\bcolor:\s*([^;]+);/)[1];
         for (const state of ['', ':hover']) {
@@ -349,7 +348,7 @@ test('mismatched passwords are rejected before reading', async () => {
 
 test('creator and generated decryptor markup contain no inline behavior', async () => {
     for (const html of [source, await artifact()]) {
-        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const markup = markupOf(html);
         assert.doesNotMatch(markup, /\son\w+\s*=/i);
         assert.doesNotMatch(markup, /\saction\s*=\s*["']\s*javascript:/i);
     }
@@ -357,7 +356,7 @@ test('creator and generated decryptor markup contain no inline behavior', async 
 
 test('password toggles on both pages have stable names, expose state and preserve independent input values', async () => {
     for (const html of [source, await artifact()]) {
-        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const markup = markupOf(html);
         const { fields, downloads } = page(html);
         const ids = html === source ? ['password', 'password_repeated'] : ['password'];
         for (const inputId of ids) {
@@ -502,8 +501,16 @@ test('hint markup and replacement tokens stay literal without injecting executab
     assertRecovered(decryptor);
 });
 
+function markupOf(html) {
+    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+}
+
+function stylesheet(html) {
+    return html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)?.[1] || '';
+}
+
 function elementText(html, id) {
-    const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    const markup = markupOf(html);
     const match = markup.match(new RegExp(`<(\\w+)[^>]*\\sid="${id}"[^>]*>([\\s\\S]*?)</\\1>`));
     assert.ok(match, `#${id} exists in markup`);
     return match[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -516,7 +523,7 @@ function describedBy(html, id) {
 
 test('both pages declare English and give password fields visible associated labels and feedback', async () => {
     for (const html of [source, await artifact()]) {
-        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const markup = markupOf(html);
         assert.match(markup, /<html\s+lang="en">/);
         for (const input of markup.matchAll(/<input\b[^>]*type="password"[^>]*>/g)) {
             const id = input[0].match(/\bid="([^"]+)"/)[1];

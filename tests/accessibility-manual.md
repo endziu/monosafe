@@ -1,12 +1,11 @@
 # Password accessibility spot check
 
-Issue #7 requires a manual keyboard and screen-reader check in addition to
-`make test`. The page simulation cannot establish actual focus behavior or
-screen-reader announcements.
+Run this manual keyboard and screen-reader check in addition to `make test`.
+The page simulation cannot establish actual focus behavior or screen-reader
+announcements.
 
-Status: pending. The implementation environment had no connected browser or
-installed screen reader. Record the browser, screen reader, versions, date,
-and results when performing this check.
+Record the browser, screen reader, versions, date, and results in the PR or
+issue when performing this check.
 
 1. Open `monosafe.html` locally with a screen reader running. Using only the
    keyboard, choose **Text message** and enter a short test message. Tab through
@@ -23,13 +22,16 @@ and results when performing this check.
    form. The accessible name stays **Show password** or **Show repeated
    password**; the pressed state changes with visibility. Verify focus stays
    on the button.
-4. Submit with mismatched passwords. Verify the error is announced. Correct
-   them, add a nonsecret test hint, and submit again. Verify **Encrypting…**
+4. Submit with mismatched passwords. Verify the error is announced. Submit
+   again without changing either password and verify the same error is
+   announced again. Correct the passwords, add a nonsecret test hint, and
+   submit again. Verify **Encrypting…**
    and **Download started: …** are announced, and **Encrypt** keeps its name.
 5. Open the downloaded HTML locally. Verify the **Password** label, hint,
    trust notice, and visibility toggle are accessible by keyboard and screen
    reader. Repeat the Space/Enter visibility check. Enter a wrong password
-   and submit, then retry with the correct one. Verify the error, progress,
+   and submit twice without changing it, then retry with the correct one.
+   Verify the error is announced on both failed attempts. Verify progress
    and download-start messages are announced and the decrypted message is
    recovered.
 6. At a narrow viewport and 200% zoom, verify labels, textual feedback, and
@@ -37,4 +39,4 @@ and results when performing this check.
 
 Password complexity feedback remains in the creator, where the password is
 chosen. If per-keystroke announcements are disruptive, record the behavior
-for the deferred announcement-consolidation work in issue #7.
+in the PR or issue before changing announcement timing.

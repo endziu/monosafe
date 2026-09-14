@@ -547,10 +547,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         var DOWNLOAD_CLEANUP_DELAY_MS = ${DOWNLOAD_CLEANUP_DELAY_MS};
 
         document.getElementById('password-toggle').addEventListener('click', function () {
-            var input = document.getElementById('password');
+            var input = document.getElementById(this.getAttribute('aria-controls'));
             var visible = input.type === 'password';
             input.type = visible ? 'text' : 'password';
-            document.getElementById('password-toggle').setAttribute('aria-pressed', String(visible));
+            this.setAttribute('aria-pressed', String(visible));
         });
 
         if (window.crypto && !window.crypto.subtle && window.crypto.webkitSubtle) {
