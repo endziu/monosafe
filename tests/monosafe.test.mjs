@@ -7,7 +7,7 @@ import { test } from 'node:test';
 const source = readFileSync(new URL('../monosafe.html', import.meta.url), 'utf8');
 const bytes = Uint8Array.of(0, 255, 47, 128, 10);
 const filename = 'private-zażółć.bin';
-const containerNamePattern = /^monosafe-[a-zA-Z0-9_-]+\.html$/;
+const containerNamePattern = /^monosafe-[0-9a-f]{32}\.html$/;
 const password = ' long unique test passphrase 🔐 ';
 
 function page(html, secret = password, repeated = secret, options = {}) {
