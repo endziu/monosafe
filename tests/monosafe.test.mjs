@@ -47,6 +47,8 @@ function page(html, secret = password, repeated = secret, options = {}) {
     };
     const downloads = [];
     const derivations = [];
+    const keyAlgorithms = [];
+    const operations = [];
     const timerErrors = [];
     let reads = 0;
     const context = vm.createContext({
@@ -60,7 +62,12 @@ function page(html, secret = password, repeated = secret, options = {}) {
                 get(target, key) {
                     if (key === 'deriveKey') return (...args) => {
                         derivations.push(args[0]);
+                        keyAlgorithms.push(args[2]);
                         return target.deriveKey(...args);
+                    };
+                    if (key === 'encrypt' || key === 'decrypt') return (...args) => {
+                        operations.push(args[0]);
+                        return target[key](...args);
                     };
                     return target[key].bind(target);
                 }
@@ -96,7 +103,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
     }
     context.download = (...args) => downloads.push(args);
     return {
-        context, status, button, fields, form, downloads, derivations, timerErrors, get reads() { return reads; },
+        context, status, button, fields, form, downloads, derivations, keyAlgorithms, operations, timerErrors, get reads() { return reads; },
         async run(name) {
             if (name === 'submit') {
                 let prevented = false;
@@ -120,6 +127,31 @@ async function artifact(options = {}) {
     assert.equal(encryptor.derivations[0].hash.name, 'SHA-256');
     return new TextDecoder().decode(encryptor.downloads[0][1]);
 }
+
+function assertCryptoProfile(instance, message) {
+    assert.equal(instance.derivations[0].name, 'PBKDF2', message);
+    assert.equal(instance.derivations[0].hash.name, 'SHA-256', message);
+    assert.equal(instance.derivations[0].iterations, 600000, message);
+    assert.equal(instance.keyAlgorithms[0].name, 'AES-GCM', message);
+    assert.equal(instance.keyAlgorithms[0].length, 128, message);
+    assert.equal(instance.operations[0].name, 'AES-GCM', message);
+    assert.equal(instance.operations[0].iv.byteLength, 12, message);
+    assert.equal(Object.hasOwn(instance.operations[0], 'length'), false, message);
+}
+
+test('new artifacts use the fixed cryptographic profile and a 96-bit IV', async () => {
+    const encryptor = page(source);
+    await encryptor.run('submit');
+    const html = new TextDecoder().decode(encryptor.downloads[0][1]);
+    const decryptor = page(html);
+    const payload = JSON.parse(decryptor.fields.data.textContent);
+    assert.equal(payload.iv.length, 12);
+    await decryptor.run('submit');
+    assertRecovered(decryptor);
+    for (const instance of [encryptor, decryptor]) {
+        assertCryptoProfile(instance);
+    }
+});
 
 function assertRecovered(decryptor) {
     assert.equal(decryptor.status.textContent, '');
@@ -280,6 +312,24 @@ test('hint markup and replacement tokens stay literal without injecting executab
     assert.equal(decryptor.fields['password-hint'].hidden, false);
     await decryptor.run('runDecrypt');
     assertRecovered(decryptor);
+});
+
+test('payload profile-looking fields cannot override the decryptor profile', async () => {
+    const html = await artifact();
+    const original = JSON.parse(page(html).fields.data.textContent);
+    const overrides = {
+        kdf: 'HKDF', hash: 'SHA-1', iterations: 1,
+        keySize: 256, cipher: 'AES-CBC', ivLength: 16,
+        name: 'AES-CBC', length: 256,
+        algorithm: { name: 'HKDF', hash: 'SHA-1', iterations: 1 },
+        profile: { kdf: 'HKDF', hash: 'SHA-1', iterations: 1, keySize: 256, cipher: 'AES-CBC', ivLength: 16 }
+    };
+    for (const [field, value] of Object.entries(overrides)) {
+        const decryptor = page(embeddedPayload(html, JSON.stringify({ ...original, [field]: value })));
+        await decryptor.run('submit');
+        assertRecovered(decryptor);
+        assertCryptoProfile(decryptor, field);
+    }
 });
 
 test('wrong passwords and modified ciphertext are rejected', async () => {
@@ -477,6 +527,16 @@ test('a 1 MiB binary file roundtrips with a Unicode filename', async () => {
     assert.equal(file.name, name);
     assert.deepEqual(file.content, content);
     assert.deepEqual(new Uint8Array(await new Blob([file.content]).arrayBuffer()), content);
+});
+
+test('an empty file roundtrips with its Unicode filename', async () => {
+    const html = await artifact({ bytes: new Uint8Array(0), filename: 'empty-🔐.bin' });
+    const decryptor = page(html);
+    await decryptor.run('submit');
+    assert.equal(decryptor.status.textContent, '');
+    assert.equal(decryptor.downloads.length, 1);
+    assert.equal(decryptor.downloads[0][0].name, 'empty-🔐.bin');
+    assert.deepEqual(decryptor.downloads[0][0].content, new Uint8Array(0));
 });
 
 test('empty file content and malformed decrypted headers are handled', async () => {
