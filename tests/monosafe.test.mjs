@@ -65,6 +65,8 @@ function page(html, secret = password, repeated = secret, options = {}) {
     const operations = [];
     const timerErrors = [];
     const timers = [];
+    // Timers of one second or more are held until the test advances them; shorter ones run at once.
+    const pendingTimers = [];
     const urls = { created: [], revoked: [] };
     const anchors = [];
     const body = {
@@ -83,9 +85,11 @@ function page(html, secret = password, repeated = secret, options = {}) {
         TextEncoder, TextDecoder, Uint8Array, Blob, DOMException, atob,
         setTimeout: (callback, delay) => {
             timers.push(delay);
-            return setTimeout(() => {
+            const guarded = () => {
                 try { callback(); } catch (error) { timerErrors.push(error); }
-            }, 0);
+            };
+            if (delay >= 1000) pendingTimers.push(guarded);
+            else setTimeout(guarded, 0);
         },
         window: eventTarget({ URL: {
             createObjectURL: blob => {
@@ -118,6 +122,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
                 assert.equal(tag, 'a');
                 const anchor = { tag, parentNode: null, clicked: [], click() {
                     assert.equal(this.parentNode, body, 'anchor is attached when clicked');
+                    assert.ok(!urls.revoked.includes(this.href), 'object URL is still live when clicked');
                     this.clicked.push({ href: this.href, download: this.download });
                 } };
                 anchors.push(anchor);
@@ -165,8 +170,8 @@ function page(html, secret = password, repeated = secret, options = {}) {
             assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
             assert.ok(!button.disabled, 'operation completes');
         },
-        async settle() {
-            await new Promise(resolve => setTimeout(resolve, 20));
+        advanceTimers() {
+            for (const callback of pendingTimers.splice(0)) callback();
             assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
         }
     };
@@ -188,7 +193,9 @@ test('downloads retain the object URL briefly, then revoke it and remove the anc
         assert.equal(instance.urls.created.length, 1, operation);
         assert.equal(anchor.clicked[0].href, instance.urls.created[0].url, operation);
         assert.ok(instance.timers.includes(DOWNLOAD_CLEANUP_DELAY), operation + ' schedules delayed cleanup');
-        await instance.settle();
+        assert.deepEqual(instance.urls.revoked, [], operation + ' keeps the URL live after initiation');
+        assert.deepEqual(instance.body.children, [anchor], operation + ' keeps the anchor attached after initiation');
+        instance.advanceTimers();
         assert.deepEqual(instance.urls.revoked, [instance.urls.created[0].url], operation);
         assert.deepEqual(instance.body.children, [], operation + ' removes the temporary anchor');
         assert.equal(instance.status.textContent, 'Download started: ' + anchor.clicked[0].download, operation);
