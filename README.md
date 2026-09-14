@@ -26,6 +26,8 @@ The encrypted file is self-contained: whoever receives it needs nothing but a br
 - Works in any modern browser; the decryptor also works in browsers going back to about 2015.
 - Your passphrase is the only thing protecting the file. Make it long and unique.
 - Anyone who has the file can try to guess the passphrase, so don't share it alongside the file.
+- Password hints are not encrypted. Anyone who opens the file can read the hint, and anyone can change it without the passphrase, so never put a secret in it.
+- The encrypted content is protected against tampering, but the HTML page around it is not. Someone could replace that page with a look-alike that captures the passphrase, and nothing in the file can stop that. Only open encrypted files from a source you trust, and use a different passphrase for each one.
 - The original filename is encrypted too and restored after decryption. New HTML containers use neutral, random names such as `monosafe-<random-token>.html` for both files and messages.
 - Very large files can be slow or run out of memory in the browser. It works best for documents, photos, and other everyday files.
 

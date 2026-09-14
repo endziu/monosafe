@@ -408,13 +408,13 @@ test('empty text messages are rejected before key derivation', async () => {
 });
 
 test('optional hints appear before password entry and preserve Unicode and line breaks', async () => {
-    const hint = 'The title of the song we heard in Italy\nZażółć 🎵';
+    const hint = 'The title of the song we heard in Italy\nZażółć 🎵\r\n\tשלום 東京';
     const html = await artifact({ hint: '  ' + hint + '  ' });
     const decryptor = page(html, '');
     assert.equal(decryptor.fields['password-hint'].textContent, 'Password hint: ' + hint);
     assert.equal(decryptor.fields['password-hint'].hidden, false);
     assert.equal(decryptor.derivations.length, 0);
-    assert.match(html, /aria-describedby="password-hint"/);
+    assert.ok(describedBy(html, 'password').includes('password-hint'));
     decryptor.fields.password.value = password;
     await decryptor.run('runDecrypt');
     assertRecovered(decryptor);
@@ -441,6 +441,42 @@ test('hint markup and replacement tokens stay literal without injecting executab
     const decryptor = page(html);
     assert.equal(decryptor.fields['password-hint'].textContent, 'Password hint: ' + hint);
     assert.equal(decryptor.fields['password-hint'].hidden, false);
+    await decryptor.run('runDecrypt');
+    assertRecovered(decryptor);
+});
+
+function elementText(html, id) {
+    const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    const match = markup.match(new RegExp(`<(\\w+)[^>]*\\sid="${id}"[^>]*>([\\s\\S]*?)</\\1>`));
+    assert.ok(match, `#${id} exists in markup`);
+    return match[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function describedBy(html, id) {
+    const input = html.match(new RegExp(`<(?:input|textarea)[^>]*\\sid="${id}"[^>]*>`))[0];
+    return (input.match(/aria-describedby="([^"]*)"/)?.[1] || '').split(/\s+/);
+}
+
+test('creator hint copy discloses visibility and mutability before hint entry', () => {
+    const note = elementText(source, 'password-hint-note');
+    assert.match(note, /not encrypted/i);
+    assert.match(note, /anyone who opens the file can read/i);
+    assert.match(note, /change it without the password/i);
+    assert.ok(describedBy(source, 'password_hint').includes('password-hint-note'));
+    assert.ok(source.indexOf('id="password-hint-note"') < source.indexOf('id="password_hint"'), 'note precedes the hint input');
+});
+
+test('generated decryptor discloses that only the encrypted content is authenticated, not the page', async () => {
+    const html = await artifact();
+    const notice = elementText(html, 'trust-notice');
+    assert.match(notice, /encrypted contents are protected against tampering/i);
+    assert.match(notice, /this page, including any password hint, isn't/i);
+    assert.match(notice, /replace it with a copy that captures your password/i);
+    assert.match(notice, /source you trust/i);
+    assert.match(notice, /different password for each file/i);
+    assert.doesNotMatch(notice, /\bCSP\b|content security policy|checksum|prevent/i);
+    assert.deepEqual(describedBy(html, 'password'), ['password-hint', 'trust-notice']);
+    const decryptor = page(html);
     await decryptor.run('runDecrypt');
     assertRecovered(decryptor);
 });

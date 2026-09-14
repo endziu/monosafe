@@ -53,8 +53,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .source-options input { position: absolute; width: 1px; min-height: 1px; opacity: 0; }
         .source-input[hidden] { display: none; }
         #message { min-height: 132px; }
-        .message-note { margin: 6px 2px 0; font-size: 13px; line-height: 1.5; }
-        .hint-option summary, .password-hint { font-size: 13px; line-height: 1.5; }
+        .message-note, .hint-note { margin: 6px 2px 0; font-size: 13px; line-height: 1.5; }
+        .hint-option summary, .password-hint, .trust-notice { font-size: 13px; line-height: 1.5; }
+        .trust-notice { margin: 0; }
         .hint-option summary { cursor: pointer; }
         .hint-option textarea { margin-top: 12px; }
         .password-hint { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
@@ -140,8 +141,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             </div>
             <details class="hint-option">
                 <summary class="muted">Add password hint (optional)</summary>
+                <p class="muted hint-note" id="password-hint-note">Not encrypted: anyone who opens the file can read the hint, and anyone can change it without the password.</p>
                 <label class="visually-hidden" for="password_hint">Password hint</label>
-                <textarea class="field" id="password_hint" rows="2" placeholder="A reference to something only we would know"></textarea>
+                <textarea class="field" id="password_hint" rows="2" aria-describedby="password-hint-note" placeholder="A reference to something only we would know"></textarea>
             </details>
             <input id="encrypt-button" type="submit" value="Encrypt">
         </form>
@@ -522,8 +524,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         <p class="intro muted">Enter the password to decrypt this file.</p>
         <noscript>JavaScript is required to decrypt files.</noscript>
         <form id="decrypt-form" style="display:none">
-            <input id="password" class="field" type="password" aria-label="Password" placeholder="Password" autocomplete="current-password" aria-describedby="password-hint" autofocus>
+            <input id="password" class="field" type="password" aria-label="Password" placeholder="Password" autocomplete="current-password" aria-describedby="password-hint trust-notice" autofocus>
             <p class="password-hint muted" id="password-hint" hidden></p>
+            <p class="trust-notice muted" id="trust-notice">Only the encrypted contents are protected against tampering. This page, including any password hint, isn't: someone could replace it with a copy that captures your password. Open files only from a source you trust, and use a different password for each file.</p>
             <input id="decrypt-button" type="submit" value="Decrypt">
         </form>
         <p id="decrypt-status" class="status" role="status" aria-live="polite"></p>
