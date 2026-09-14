@@ -26,7 +26,7 @@ The encrypted file is self-contained: whoever receives it needs nothing but a br
 - Works in any modern browser; the decryptor also works in browsers going back to about 2015.
 - Your passphrase is the only thing protecting the file. Make it long and unique.
 - Anyone who has the file can try to guess the passphrase, so don't share it alongside the file.
-- The filename is encrypted too. Rename the HTML file if you want to keep the original name secret.
+- The original filename is encrypted too and restored after decryption. New HTML containers use neutral, random names such as `monosafe-<random-token>.html` for both files and messages.
 - Very large files can be slow or run out of memory in the browser. It works best for documents, photos, and other everyday files.
 
 ## Development

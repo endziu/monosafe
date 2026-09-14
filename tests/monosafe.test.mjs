@@ -7,6 +7,7 @@ import { test } from 'node:test';
 const source = readFileSync(new URL('../monosafe.html', import.meta.url), 'utf8');
 const bytes = Uint8Array.of(0, 255, 47, 128, 10);
 const filename = 'private-zażółć.bin';
+const containerNamePattern = /^monosafe-[a-zA-Z0-9_-]+\.html$/;
 const password = ' long unique test passphrase 🔐 ';
 
 function page(html, secret = password, repeated = secret, options = {}) {
@@ -224,12 +225,39 @@ test('password toggle clicks affect only the controlled input and preserve value
     }
 });
 
+test('file and message containers have fresh neutral names and keep original names encrypted', async () => {
+    for (const options of [{}, { source: 'message', message: 'Private café meeting 🔐' }]) {
+        const originalName = options.source === 'message' ? 'message.txt' : filename;
+        const encryptor = page(source, password, password, options);
+        const names = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+            await encryptor.run('submit');
+            assert.equal(encryptor.status.textContent, '');
+            assert.equal(encryptor.downloads.length, attempt + 1);
+            const [name, buffer] = encryptor.downloads[attempt];
+            assert.match(name, containerNamePattern);
+            names.push(name);
+            const html = new TextDecoder().decode(buffer);
+            const wrapper = html.replace(/("encrypted":")[^"]*"/, '$1"');
+            assert.ok(!wrapper.includes(originalName), 'wrapper does not disclose the original filename');
+            const decryptor = page(html);
+            await decryptor.run('submit');
+            assert.equal(decryptor.status.textContent, '');
+            assert.equal(decryptor.downloads.length, 1);
+            assert.equal(decryptor.downloads[0][0].name, originalName);
+            assert.deepEqual(decryptor.downloads[0][0].content,
+                options.source === 'message' ? new TextEncoder().encode(options.message) : bytes);
+        }
+        assert.notEqual(names[0], names[1], 'each encryption gets a fresh container name');
+    }
+});
+
 test('form submissions encrypt and decrypt without navigating', async () => {
     const encryptor = page(source);
     assert.equal(encryptor.form.style.display, 'grid');
     await encryptor.run('submit');
     assert.equal(encryptor.downloads.length, 1);
-    assert.equal(encryptor.downloads[0][0], filename + '.html');
+    assert.match(encryptor.downloads[0][0], containerNamePattern);
     const decryptor = page(new TextDecoder().decode(encryptor.downloads[0][1]));
     assert.equal(decryptor.form.style.display, 'grid');
     await decryptor.run('submit');
@@ -257,7 +285,7 @@ test('text messages encrypt without file reading and decrypt as message.txt', as
 
     assert.equal(encryptor.reads, 0);
     assert.equal(encryptor.downloads.length, 1);
-    assert.equal(encryptor.downloads[0][0], 'message.txt.html');
+    assert.match(encryptor.downloads[0][0], containerNamePattern);
     const html = new TextDecoder().decode(encryptor.downloads[0][1]);
     assert.ok(!html.includes(message));
 
