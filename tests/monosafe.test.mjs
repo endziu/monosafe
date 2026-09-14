@@ -27,8 +27,13 @@ function page(html, secret = password, repeated = secret, options = {}) {
         set textContent(value) { statuses.push(value); }
     };
     const buttonLabel = html.includes('id="encrypt-form"') ? 'Encrypt' : 'Decrypt';
-    const button = { disabled: false, value: buttonLabel };
-    const buttonLabels = new Set();
+    const observedButtonValues = new Set([buttonLabel]);
+    let buttonValue = buttonLabel;
+    const button = {
+        disabled: false,
+        get value() { return buttonValue; },
+        set value(value) { buttonValue = value; observedButtonValues.add(value); }
+    };
     const form = eventTarget({ style: {} });
     const fields = {
         password: eventTarget({ value: secret, id: 'password', type: 'password' }),
@@ -96,7 +101,6 @@ function page(html, secret = password, repeated = secret, options = {}) {
                     if (key === 'deriveKey') return (...args) => {
                         derivations.push(args[0]);
                         derivationStatuses.push(status.textContent);
-                        buttonLabels.add(button.value);
                         keyAlgorithms.push(args[2]);
                         return target.deriveKey(...args);
                     };
@@ -148,7 +152,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
     }
     if (options.download !== 'native') context.download = (...args) => downloads.push(args);
     return {
-        context, status, statuses, button, buttonLabel, buttonLabels, fields, form, downloads, derivations, derivationStatuses,
+        context, status, statuses, button, buttonLabel, observedButtonValues, fields, form, downloads, derivations, derivationStatuses,
         keyAlgorithms, operations, timerErrors, timers, urls, anchors, body, get reads() { return reads; },
         async run(name) {
             if (name === 'submit') {
@@ -160,7 +164,6 @@ function page(html, secret = password, repeated = secret, options = {}) {
             while (button.disabled && !timerErrors.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
             assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
             assert.ok(!button.disabled, 'operation completes');
-            buttonLabels.add(button.value);
         },
         async settle() {
             await new Promise(resolve => setTimeout(resolve, 20));
@@ -203,7 +206,7 @@ test('status announces progress before key derivation and download start after, 
         assert.equal(instance.status.textContent, 'Download started: ' + name, operation);
         assert.doesNotMatch(instance.statuses.join('\n'), /\bsaved\b/i, operation);
         assert.equal(instance.status.dataset.tone, 'info', operation);
-        assert.deepEqual([...instance.buttonLabels], [instance.buttonLabel], operation + ' keeps the button label fixed');
+        assert.deepEqual([...instance.observedButtonValues], [instance.buttonLabel], operation + ' never rewrites the button label');
     }
 });
 
