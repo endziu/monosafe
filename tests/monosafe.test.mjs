@@ -11,11 +11,17 @@ const containerNamePattern = /^monosafe-[0-9a-f]{32}\.html$/;
 const password = ' long unique test passphrase 🔐 ';
 
 function page(html, secret = password, repeated = secret, options = {}) {
+    const markup = markupOf(html);
+    function attributes(id) {
+        const tag = markup.match(new RegExp(`<[^>]+\\bid="${id}"[^>]*>`));
+        return Object.fromEntries([...(tag?.[0] || '').matchAll(/([\w-]+)="([^"]*)"/g)]
+            .map(([, name, value]) => [name, value]));
+    }
     function eventTarget(properties = {}) {
         const listeners = {};
         return Object.assign(properties, {
             addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
-            dispatch(type, event) { for (const callback of listeners[type] || []) callback(event); },
+            dispatch(type, event) { for (const callback of listeners[type] || []) callback.call(this, event); },
             getAttribute(name) { return this[name]; },
             setAttribute(name, value) { this[name] = value; }
         });
@@ -37,12 +43,12 @@ function page(html, secret = password, repeated = secret, options = {}) {
     const form = eventTarget({ style: {} });
     const fields = {
         password: eventTarget({ value: secret, id: 'password', type: 'password' }),
-        'password-toggle': eventTarget({ 'aria-controls': 'password' }),
-        'password-repeated-toggle': eventTarget({ 'aria-controls': 'password_repeated' }),
+        'password-toggle': eventTarget(attributes('password-toggle')),
+        'password-repeated-toggle': eventTarget(attributes('password-repeated-toggle')),
         'encrypt-form': form, 'decrypt-form': form,
         'encrypt-button': button, 'decrypt-button': button,
         'encrypt-status': status, 'decrypt-status': status,
-        'page-style': { textContent: '' },
+        'page-style': { textContent: stylesheet(html) },
         password_hint: { value: options.hint || '' },
         'source-file': eventTarget({ checked: options.source !== 'message' }),
         'source-message': eventTarget({ checked: options.source === 'message' }),
@@ -50,11 +56,11 @@ function page(html, secret = password, repeated = secret, options = {}) {
         'message-source': { hidden: true },
         message: { value: options.message || '' },
         'password-hint': { textContent: '', hidden: true },
-        'password-strength': { dataset: {} }, 'password-strength-label': { textContent: 'password strength', setAttribute(name, value) { this[name] = value; } }, password_repeated: eventTarget({ value: repeated, id: 'password_repeated', type: 'password' }),
+        'password-strength': { dataset: {} },
+        password_repeated: eventTarget({ value: repeated, id: 'password_repeated', type: 'password' }),
         'password-strength-status': { textContent: '' },
         'password-match-status': { textContent: '' },
         'password-match': { dataset: {} },
-        'password-match-label': { textContent: 'passwords match', setAttribute(name, value) { this[name] = value; } },
         file: { files: [{ name: options.filename || filename }] },
         data: { textContent: html.match(/<script id="data"[^>]*>([\s\S]*?)<\/script>/)?.[1] }
     };
@@ -129,7 +135,6 @@ function page(html, secret = password, repeated = secret, options = {}) {
                 return anchor;
             },
             getElementById: id => {
-                const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '<script>');
                 assert.ok(html.includes(`id="${id}"`) && (id === 'data' || markup.includes(`id="${id}"`)), `element #${id} exists in markup`);
                 return fields[id];
             },
@@ -217,9 +222,48 @@ test('status announces progress before key derivation and download start after, 
     }
 });
 
+test('operation feedback stays in a persistent atomic live region on both pages', async () => {
+    for (const html of [source, await artifact()]) {
+        const markup = markupOf(html);
+        const region = markup.match(/<p\b[^>]*id="(?:encrypt|decrypt)-status"[^>]*>/)[0];
+        assert.match(region, /role="status"/);
+        assert.match(region, /aria-live="polite"/);
+        assert.match(region, /aria-atomic="true"/);
+        assert.doesNotMatch(region, /\bhidden\b|aria-hidden|style=/);
+        const css = stylesheet(markup);
+        for (const [, declarations] of css.matchAll(/\.status(?::empty)?\s*\{([^}]+)\}/g)) {
+            assert.doesNotMatch(declarations, /display:\s*none|visibility:\s*hidden/);
+        }
+    }
+});
+
 test('primary action labels are a fixed neutral Encrypt / Decrypt', async () => {
     assert.match(source, /<input id="encrypt-button" type="submit" value="Encrypt">/);
     assert.match(await artifact(), /<input id="decrypt-button" type="submit" value="Decrypt">/);
+});
+
+test('primary button text meets AA contrast in both stylesheets, including hover', async () => {
+    function luminance(color) {
+        const hex = color === 'white' ? 'ffffff' : color.replace('#', '');
+        assert.match(hex, /^[0-9a-f]{6}$/i, 'expected an opaque RGB color');
+        const channels = hex.match(/../g).map(channel => {
+            const value = parseInt(channel, 16) / 255;
+            return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    }
+    for (const html of [source, await artifact()]) {
+        const css = stylesheet(html);
+        const normal = css.match(/input\[type=submit\]\s*\{([^}]+)\}/)[1];
+        const foreground = normal.match(/\bcolor:\s*([^;]+);/)[1];
+        for (const state of ['', ':hover']) {
+            const rule = css.match(new RegExp(`input\\[type=submit\\]${state}\\s*\\{([^}]+)\\}`))[1];
+            const background = rule.match(/\bbackground:\s*([^;]+);/)[1];
+            const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+            const ratio = (lighter + 0.05) / (darker + 0.05);
+            assert.ok(ratio >= 4.5, `${state || 'normal'} contrast ${ratio.toFixed(2)}:1 must be at least 4.5:1`);
+        }
+    }
 });
 
 async function artifact(options = {}) {
@@ -304,26 +348,38 @@ test('mismatched passwords are rejected before reading', async () => {
 
 test('creator and generated decryptor markup contain no inline behavior', async () => {
     for (const html of [source, await artifact()]) {
-        const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const markup = markupOf(html);
         assert.doesNotMatch(markup, /\son\w+\s*=/i);
         assert.doesNotMatch(markup, /\saction\s*=\s*["']\s*javascript:/i);
     }
 });
 
-test('password toggle clicks affect only the controlled input and preserve values', () => {
-    const { fields } = page(source);
-    for (const [id, inputId, otherId, label] of [
-        ['password-toggle', 'password', 'password_repeated', 'password'],
-        ['password-repeated-toggle', 'password_repeated', 'password', 'repeated password']
-    ]) {
-        const toggle = fields[id];
-        for (const [type, pressed, action] of [['text', 'true', 'Hide'], ['password', 'false', 'Show']]) {
-            toggle.dispatch('click');
-            assert.equal(fields[inputId].type, type);
-            assert.equal(fields[inputId].value, password);
-            assert.equal(fields[otherId].type, 'password');
-            assert.equal(toggle.getAttribute('aria-pressed'), pressed);
-            assert.equal(toggle.getAttribute('aria-label'), action + ' ' + label);
+test('password toggles on both pages have stable names, expose state and preserve independent input values', async () => {
+    for (const html of [source, await artifact()]) {
+        const markup = markupOf(html);
+        const { fields, downloads } = page(html);
+        const ids = html === source ? ['password', 'password_repeated'] : ['password'];
+        for (const inputId of ids) {
+            const tag = markup.match(new RegExp(`<button\\b[^>]*aria-controls="${inputId}"[^>]*>`))?.[0];
+            assert.ok(tag, `#${inputId} has a button toggle`);
+            assert.match(tag, /type="button"/);
+            const id = tag.match(/\bid="([^"]+)"/)[1];
+            const toggle = fields[id];
+            const label = inputId === 'password' ? 'Show password' : 'Show repeated password';
+            assert.equal(toggle.getAttribute('aria-label'), label);
+            assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+            for (const [type, pressed] of [['text', 'true'], ['password', 'false']]) {
+                toggle.dispatch('click');
+                assert.equal(fields[inputId].type, type);
+                assert.equal(fields[inputId].value, password);
+                for (const otherId of ids.filter(otherId => otherId !== inputId)) {
+                    assert.equal(fields[otherId].type, 'password');
+                    assert.equal(fields[otherId].value, password);
+                }
+                assert.equal(toggle.getAttribute('aria-pressed'), pressed);
+                assert.equal(toggle.getAttribute('aria-label'), label);
+                assert.equal(downloads.length, 0);
+            }
         }
     }
 });
@@ -445,8 +501,16 @@ test('hint markup and replacement tokens stay literal without injecting executab
     assertRecovered(decryptor);
 });
 
+function markupOf(html) {
+    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+}
+
+function stylesheet(html) {
+    return html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)?.[1] || '';
+}
+
 function elementText(html, id) {
-    const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    const markup = markupOf(html);
     const match = markup.match(new RegExp(`<(\\w+)[^>]*\\sid="${id}"[^>]*>([\\s\\S]*?)</\\1>`));
     assert.ok(match, `#${id} exists in markup`);
     return match[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -456,6 +520,24 @@ function describedBy(html, id) {
     const input = html.match(new RegExp(`<(?:input|textarea)[^>]*\\sid="${id}"[^>]*>`))[0];
     return (input.match(/aria-describedby="([^"]*)"/)?.[1] || '').split(/\s+/);
 }
+
+test('both pages declare English and give password fields visible associated labels and feedback', async () => {
+    for (const html of [source, await artifact()]) {
+        const markup = markupOf(html);
+        assert.match(markup, /<html\s+lang="en">/);
+        for (const input of markup.matchAll(/<input\b[^>]*type="password"[^>]*>/g)) {
+            const id = input[0].match(/\bid="([^"]+)"/)[1];
+            const label = markup.match(new RegExp(`<label\\b([^>]*\\bfor="${id}"[^>]*)>([^<]+)</label>`));
+            assert.ok(label, `#${id} has a persistent label`);
+            assert.doesNotMatch(label[1], /visually-hidden|\bhidden\b|aria-hidden|style=/);
+            assert.equal(label[2], id === 'password' ? 'Password' : 'Repeat password');
+            assert.doesNotMatch(input[0], /aria-label=|placeholder=/);
+            const feedback = describedBy(markup, id);
+            assert.ok(feedback.includes(markup.includes('id="encrypt-form"') ? 'encrypt-status' : 'decrypt-status'));
+            for (const target of feedback) assert.ok(markup.includes(`id="${target}"`), `${target} exists`);
+        }
+    }
+});
 
 test('creator hint copy discloses visibility and mutability before hint entry', () => {
     const note = elementText(source, 'password-hint-note');
@@ -475,7 +557,9 @@ test('generated decryptor discloses that only the encrypted content is authentic
     assert.match(notice, /source you trust/i);
     assert.match(notice, /different password for each file/i);
     assert.doesNotMatch(notice, /\bCSP\b|content security policy|checksum|prevent/i);
-    assert.deepEqual(describedBy(html, 'password'), ['password-hint', 'trust-notice']);
+    for (const id of ['password-hint', 'trust-notice']) {
+        assert.ok(describedBy(html, 'password').includes(id));
+    }
     const decryptor = page(html);
     await decryptor.run('runDecrypt');
     assertRecovered(decryptor);
@@ -539,7 +623,6 @@ test('indicator updates and resets without changing password input', () => {
         context.updatePasswordStrength();
         assert.equal(context.document.getElementById('password-strength').dataset.level, level);
         assert.equal(input.value, value);
-        assert.equal(context.document.getElementById('password-strength-label').textContent, 'password strength');
         assert.equal(context.document.getElementById('password-strength-status').textContent, 'Password strength: ' + (level === 'empty' ? 'not entered' : level));
     }
 });
@@ -592,16 +675,15 @@ test('strength boundaries retain long varied passphrases and random lowercase pa
     ]) assert.equal(context.passwordStrength(value), level, value);
 });
 
-test('live status markup describes inputs and keeps visible labels out of announcements', () => {
-    for (const [input, name, label] of [
-        ['password', 'strength', 'password strength'], ['password_repeated', 'match', 'passwords match']
+test('complexity and match feedback is visible text as well as color and describes the inputs', () => {
+    for (const [input, name] of [
+        ['password', 'strength'], ['password_repeated', 'match']
     ]) {
-        assert.match(source.match(new RegExp(`<input[^>]*id="${input}"[^>]*>`))[0], new RegExp(`aria-describedby="password-${name}-status"`));
+        assert.ok(describedBy(source, input).includes(`password-${name}-status`));
         const status = source.match(new RegExp(`<span[^>]*id="password-${name}-status"[^>]*>`))[0];
         assert.match(status, /role="status"/);
         assert.match(status, /aria-atomic="true"/);
-        assert.match(status, /class="visually-hidden"/);
-        assert.match(source, new RegExp(`<span id="password-${name}-label" aria-hidden="true">${label}</span>`));
+        assert.doesNotMatch(status, /visually-hidden|\bhidden\b|aria-hidden|style=/);
     }
 });
 
@@ -637,8 +719,6 @@ test('input, change, pageshow and form reset update meaningful live text', async
     assert.equal(fields['password-strength-status'].textContent, 'Password strength: not entered');
     assert.equal(fields['password-match-status'].textContent, 'Passwords not entered');
     assert.equal(fields['password-match'].dataset.match, 'false');
-    assert.equal(fields['password-strength-label'].textContent, 'password strength');
-    assert.equal(fields['password-match-label'].textContent, 'passwords match');
 });
 
 test('WebCrypto context failures return before reading or derivation in both paths', async () => {
