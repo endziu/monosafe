@@ -255,6 +255,16 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         }
         updateEncryptionSource();
 
+        // Authoritative profile: generated decryptors embed these values, never payload metadata.
+        const CRYPTO_PROFILE = Object.freeze({
+            kdf: 'PBKDF2',
+            hash: 'SHA-256',
+            iterations: 600000,
+            keySize: 128,
+            cipher: 'AES-GCM',
+            ivLength: 12
+        });
+
         function getRandomBytes(num) {
             let bytes = new Uint8Array(num);
             window.crypto.getRandomValues(bytes);
@@ -289,22 +299,22 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             return window.crypto.subtle.importKey(
                 'raw',
                 passwordBytes, {
-                    name: 'PBKDF2',
+                    name: CRYPTO_PROFILE.kdf,
                 },
                 false,
                 ['deriveKey']
             ).then(function (key) {
                 return window.crypto.subtle.deriveKey({
-                        name: 'PBKDF2',
+                        name: CRYPTO_PROFILE.kdf,
                         salt,
-                        iterations: 600000,
+                        iterations: CRYPTO_PROFILE.iterations,
                         hash: {
-                            name: 'SHA-256'
+                            name: CRYPTO_PROFILE.hash
                         }
                     },
                     key, {
-                        name: 'AES-GCM',
-                        length: 128
+                        name: CRYPTO_PROFILE.cipher,
+                        length: CRYPTO_PROFILE.keySize
                     },
                     false,
                     ['encrypt']
@@ -314,8 +324,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
         function encrypt(key, iv, bytes) {
             return window.crypto.subtle.encrypt({
-                name: 'AES-GCM',
-                length: 128,
+                name: CRYPTO_PROFILE.cipher,
                 iv
             }, key, bytes);
         }
@@ -446,7 +455,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             encryptButton.value = 'Encrypting…';
 
             const salt = getRandomBytes(16);
-            const iv = getRandomBytes(16);
+            const iv = getRandomBytes(CRYPTO_PROFILE.ivLength);
 
             const filename = messageSelected ? 'message.txt' : file.name;
             const content = messageSelected
@@ -502,6 +511,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         {{___PAYLOAD___}}
     <\/script>
     <script>
+        var CRYPTO_PROFILE = ${JSON.stringify(CRYPTO_PROFILE)};
+
         if (window.crypto && !window.crypto.subtle && window.crypto.webkitSubtle) {
             window.crypto.subtle = window.crypto.webkitSubtle;
         }
@@ -532,22 +543,22 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             return window.crypto.subtle.importKey(
                 'raw',
                 passwordBytes, {
-                    name: 'PBKDF2'
+                    name: CRYPTO_PROFILE.kdf
                 },
                 false,
                 ['deriveKey']
             ).then(function (key) {
                 return window.crypto.subtle.deriveKey({
-                        name: 'PBKDF2',
+                        name: CRYPTO_PROFILE.kdf,
                         salt: salt,
-                        iterations: 600000,
+                        iterations: CRYPTO_PROFILE.iterations,
                         hash: {
-                            name: 'SHA-256'
+                            name: CRYPTO_PROFILE.hash
                         }
                     },
                     key, {
-                        name: 'AES-GCM',
-                        length: 128
+                        name: CRYPTO_PROFILE.cipher,
+                        length: CRYPTO_PROFILE.keySize
                     },
                     false,
                     ['decrypt']
@@ -557,8 +568,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
         function decrypt(key, iv, bytes) {
             return window.crypto.subtle.decrypt({
-                name: 'AES-GCM',
-                length: 128,
+                name: CRYPTO_PROFILE.cipher,
                 iv: iv
             }, key, bytes);
         }
