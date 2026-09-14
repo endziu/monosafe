@@ -39,7 +39,7 @@ make deploy   # publish with surge
 
 ## Credits
 
-MonoSafe is based on [PolySafe](https://github.com/fmeum/polysafe) by Fabian Henneke. This is an independent project by [endziu](https://github.com/endziu), not affiliated with the original author.
+MonoSafe is based on [PolySafe](https://github.com/fmeum/polysafe) by Fabian Henneke.
 
 ## License
 
