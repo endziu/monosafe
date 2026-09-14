@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <!--
 Copyright 2018 Fabian Henneke
 
@@ -66,8 +66,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .password-toggle svg { width: 20px; height: 20px; }
         .eye-slash { display: none; }
         .password-toggle[aria-pressed=true] .eye-slash { display: block; }
-        input[type=submit] { border: 0; padding: 12px; background: #7c6df2; color: white; font-weight: 600; cursor: pointer; }
-        input[type=submit]:hover { background: #6d5ee8; }
+        input[type=submit] { border: 0; padding: 12px; background: #6d5ee8; color: white; font-weight: 600; cursor: pointer; }
+        input[type=submit]:hover { background: #5e4ed6; }
         input[type=submit]:disabled { opacity: .65; cursor: wait; }
         input[type=file] { padding: 8px; border: 1px solid #343a46; background: #11141a; }
         input[type=file]::file-selector-button { margin-right: 10px; padding: 8px 10px; border: 0; border-radius: 6px; background: #252a34; color: #f1f3f5; font: inherit; font-weight: 600; cursor: pointer; }
@@ -81,7 +81,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .status, noscript { color: #ff8a8a; line-height: 1.5; }
         .status { margin: 16px 0 0; }
         .status[data-tone=info] { color: #9ca3af; }
-        .status:empty { display: none; }
+        .status:empty { margin: 0; }
         noscript { display: block; }
         @media (max-width: 380px) { main { padding: 24px 20px; } }
     </style>
@@ -105,8 +105,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 <textarea class="field" id="message" rows="5" placeholder="Write a private message"></textarea>
                 <p class="muted message-note">The decrypted message will be saved as message.txt.</p>
             </div>
+            <label for="password">Password</label>
             <div class="password-field">
-                <input type="password" class="field" id="password" aria-label="Password" placeholder="Password" autocomplete="new-password" aria-describedby="password-strength-status" required>
+                <input type="password" class="field" id="password" autocomplete="new-password" aria-describedby="password-strength-status encrypt-status" required>
                 <button type="button" class="muted password-toggle" aria-label="Show password" aria-controls="password" aria-pressed="false" id="password-toggle">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
@@ -116,16 +117,16 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 </button>
             </div>
             <div class="row muted password-strength" id="password-strength" data-level="empty">
-                <span id="password-strength-label" aria-hidden="true">password strength</span>
-                <span id="password-strength-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
+                <span id="password-strength-status" role="status" aria-live="polite" aria-atomic="true"></span>
                 <span class="strength-lights" aria-hidden="true">
                     <span class="strength-light"></span>
                     <span class="strength-light"></span>
                     <span class="strength-light"></span>
                 </span>
             </div>
+            <label for="password_repeated">Repeat password</label>
             <div class="password-field">
-                <input type="password" class="field" id="password_repeated" aria-label="Repeat password" placeholder="Repeat password" autocomplete="new-password" aria-describedby="password-match-status" required>
+                <input type="password" class="field" id="password_repeated" autocomplete="new-password" aria-describedby="password-match-status encrypt-status" required>
                 <button type="button" class="muted password-toggle" aria-label="Show repeated password" aria-controls="password_repeated" aria-pressed="false" id="password-repeated-toggle">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
@@ -135,8 +136,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 </button>
             </div>
             <div class="row muted password-match" id="password-match" data-match="false">
-                <span id="password-match-label" aria-hidden="true">passwords match</span>
-                <span id="password-match-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
+                <span id="password-match-status" role="status" aria-live="polite" aria-atomic="true"></span>
                 <span class="strength-light" aria-hidden="true"></span>
             </div>
             <details class="hint-option">
@@ -147,7 +147,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             </details>
             <input id="encrypt-button" type="submit" value="Encrypt">
         </form>
-        <p id="encrypt-status" class="status" role="status" aria-live="polite"></p>
+        <p id="encrypt-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
     </main>
     <script>
         'use strict';
@@ -157,8 +157,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             const visible = input.type === 'password';
             input.type = visible ? 'text' : 'password';
             button.setAttribute('aria-pressed', String(visible));
-            const label = input.id === 'password' ? 'password' : 'repeated password';
-            button.setAttribute('aria-label', (visible ? 'Hide ' : 'Show ') + label);
         }
 
         for (const id of ['password-toggle', 'password-repeated-toggle']) {
@@ -509,7 +507,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         const DECRYPTOR_TEMPLATE =
             `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="utf-8" />
@@ -524,12 +522,22 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         <p class="intro muted">Enter the password to decrypt this file.</p>
         <noscript>JavaScript is required to decrypt files.</noscript>
         <form id="decrypt-form" style="display:none">
-            <input id="password" class="field" type="password" aria-label="Password" placeholder="Password" autocomplete="current-password" aria-describedby="password-hint trust-notice" autofocus>
+            <label for="password">Password</label>
+            <div class="password-field">
+                <input id="password" class="field" type="password" autocomplete="current-password" aria-describedby="password-hint trust-notice decrypt-status" autofocus>
+                <button type="button" class="muted password-toggle" aria-label="Show password" aria-controls="password" aria-pressed="false" id="password-toggle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                        <circle cx="12" cy="12" r="3" />
+                        <path class="eye-slash" d="m3 3 18 18" />
+                    </svg>
+                </button>
+            </div>
             <p class="password-hint muted" id="password-hint" hidden></p>
             <p class="trust-notice muted" id="trust-notice">Only the encrypted contents are protected against tampering. This page, including any password hint, isn't: someone could replace it with a copy that captures your password. Open files only from a source you trust, and use a different password for each file.</p>
             <input id="decrypt-button" type="submit" value="Decrypt">
         </form>
-        <p id="decrypt-status" class="status" role="status" aria-live="polite"></p>
+        <p id="decrypt-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
     </main>
     <script id="data" type="application/json">
         {{___PAYLOAD___}}
@@ -537,6 +545,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     <script>
         var CRYPTO_PROFILE = ${JSON.stringify(CRYPTO_PROFILE)};
         var DOWNLOAD_CLEANUP_DELAY_MS = ${DOWNLOAD_CLEANUP_DELAY_MS};
+
+        document.getElementById('password-toggle').addEventListener('click', function () {
+            var input = document.getElementById('password');
+            var visible = input.type === 'password';
+            input.type = visible ? 'text' : 'password';
+            document.getElementById('password-toggle').setAttribute('aria-pressed', String(visible));
+        });
 
         if (window.crypto && !window.crypto.subtle && window.crypto.webkitSubtle) {
             window.crypto.subtle = window.crypto.webkitSubtle;
