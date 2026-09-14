@@ -271,6 +271,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             return bytes;
         }
 
+        function containerFilename() {
+            const token = Array.from(getRandomBytes(16), byte => byte.toString(16).padStart(2, '0')).join('');
+            return 'monosafe-' + token + '.html';
+        }
+
         function readFile(file) {
             const reader = new FileReader();
 
@@ -467,7 +472,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 .then(payload_bytes => deriveKey(password, salt)
                     .then(key => encrypt(key, iv, payload_bytes)))
                 .then(buffer => serialize(salt, iv, buffer, hint))
-                .then(buffer => download(filename + '.html', buffer))
+                .then(buffer => download(containerFilename(), buffer))
                 .catch(e => {
                     status.textContent = 'Encryption failed: ' + (e.message || e.name);
                 })
