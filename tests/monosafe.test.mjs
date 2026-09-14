@@ -20,8 +20,15 @@ function page(html, secret = password, repeated = secret, options = {}) {
             setAttribute(name, value) { this[name] = value; }
         });
     }
-    const status = { textContent: '' };
-    const button = { disabled: false, value: html.includes('id="data"') ? 'Decrypt file' : 'Encrypt file' };
+    const statuses = [];
+    const status = {
+        dataset: {},
+        get textContent() { return statuses.length ? statuses[statuses.length - 1] : ''; },
+        set textContent(value) { statuses.push(value); }
+    };
+    const buttonLabel = html.includes('id="encrypt-form"') ? 'Encrypt' : 'Decrypt';
+    const button = { disabled: false, value: buttonLabel };
+    const buttonLabels = new Set();
     const form = eventTarget({ style: {} });
     const fields = {
         password: eventTarget({ value: secret, id: 'password', type: 'password' }),
@@ -48,21 +55,48 @@ function page(html, secret = password, repeated = secret, options = {}) {
     };
     const downloads = [];
     const derivations = [];
+    const derivationStatuses = [];
     const keyAlgorithms = [];
     const operations = [];
     const timerErrors = [];
+    const timers = [];
+    const urls = { created: [], revoked: [] };
+    const anchors = [];
+    const body = {
+        children: [],
+        appendChild(node) { body.children.push(node); node.parentNode = body; return node; },
+        removeChild(node) {
+            const index = body.children.indexOf(node);
+            assert.notEqual(index, -1, 'removed node is attached to body');
+            body.children.splice(index, 1);
+            node.parentNode = null;
+            return node;
+        }
+    };
     let reads = 0;
     const context = vm.createContext({
         TextEncoder, TextDecoder, Uint8Array, Blob, DOMException, atob,
-        setTimeout: callback => setTimeout(() => {
-            try { callback(); } catch (error) { timerErrors.push(error); }
-        }, 0),
-        window: eventTarget({ crypto: {
+        setTimeout: (callback, delay) => {
+            timers.push(delay);
+            return setTimeout(() => {
+                try { callback(); } catch (error) { timerErrors.push(error); }
+            }, 0);
+        },
+        window: eventTarget({ URL: {
+            createObjectURL: blob => {
+                const url = 'blob:monosafe/' + urls.created.length;
+                urls.created.push({ url, blob });
+                return url;
+            },
+            revokeObjectURL: url => urls.revoked.push(url)
+        }, crypto: {
             getRandomValues: array => webcrypto.getRandomValues(array),
             subtle: new Proxy(webcrypto.subtle, {
                 get(target, key) {
                     if (key === 'deriveKey') return (...args) => {
                         derivations.push(args[0]);
+                        derivationStatuses.push(status.textContent);
+                        buttonLabels.add(button.value);
                         keyAlgorithms.push(args[2]);
                         return target.deriveKey(...args);
                     };
@@ -75,6 +109,16 @@ function page(html, secret = password, repeated = secret, options = {}) {
             })
         }, ...options.window }),
         document: {
+            body,
+            createElement(tag) {
+                assert.equal(tag, 'a');
+                const anchor = { tag, parentNode: null, clicked: [], click() {
+                    assert.equal(this.parentNode, body, 'anchor is attached when clicked');
+                    this.clicked.push({ href: this.href, download: this.download });
+                } };
+                anchors.push(anchor);
+                return anchor;
+            },
             getElementById: id => {
                 const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '<script>');
                 assert.ok(html.includes(`id="${id}"`) && (id === 'data' || markup.includes(`id="${id}"`)), `element #${id} exists in markup`);
@@ -102,9 +146,10 @@ function page(html, secret = password, repeated = secret, options = {}) {
     for (const match of html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) {
         if (!match[1].includes('application/json')) vm.runInContext(match[2], context);
     }
-    context.download = (...args) => downloads.push(args);
+    if (options.download !== 'native') context.download = (...args) => downloads.push(args);
     return {
-        context, status, button, fields, form, downloads, derivations, keyAlgorithms, operations, timerErrors, get reads() { return reads; },
+        context, status, statuses, button, buttonLabel, buttonLabels, fields, form, downloads, derivations, derivationStatuses,
+        keyAlgorithms, operations, timerErrors, timers, urls, anchors, body, get reads() { return reads; },
         async run(name) {
             if (name === 'submit') {
                 let prevented = false;
@@ -115,15 +160,63 @@ function page(html, secret = password, repeated = secret, options = {}) {
             while (button.disabled && !timerErrors.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
             assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
             assert.ok(!button.disabled, 'operation completes');
+            buttonLabels.add(button.value);
+        },
+        async settle() {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            assert.deepEqual(timerErrors, [], 'no exceptions escape timer callbacks');
         }
     };
 }
 
+const DOWNLOAD_CLEANUP_DELAY = 10000;
+
+test('downloads retain the object URL briefly, then revoke it and remove the anchor, in both flows', async () => {
+    const html = await artifact();
+    for (const [document, operation, namePattern] of [
+        [source, 'runEncrypt', containerNamePattern], [html, 'runDecrypt', new RegExp('^' + filename.replace(/[.]/g, '\\.') + '$')]
+    ]) {
+        const instance = page(document, password, password, { download: 'native' });
+        await instance.run(operation);
+        assert.equal(instance.anchors.length, 1, operation);
+        const [anchor] = instance.anchors;
+        assert.equal(anchor.clicked.length, 1, operation);
+        assert.match(anchor.clicked[0].download, namePattern, operation);
+        assert.equal(instance.urls.created.length, 1, operation);
+        assert.equal(anchor.clicked[0].href, instance.urls.created[0].url, operation);
+        assert.ok(instance.timers.includes(DOWNLOAD_CLEANUP_DELAY), operation + ' schedules delayed cleanup');
+        await instance.settle();
+        assert.deepEqual(instance.urls.revoked, [instance.urls.created[0].url], operation);
+        assert.deepEqual(instance.body.children, [], operation + ' removes the temporary anchor');
+        assert.equal(instance.status.textContent, 'Download started: ' + anchor.clicked[0].download, operation);
+    }
+});
+
+test('status announces progress before key derivation and download start after, with fixed button labels', async () => {
+    const html = await artifact();
+    for (const [document, operation, verb] of [[source, 'runEncrypt', 'Encrypting'], [html, 'runDecrypt', 'Decrypting']]) {
+        const instance = page(document);
+        await instance.run(operation);
+        assert.equal(instance.derivationStatuses.length, 1, operation);
+        assert.match(instance.derivationStatuses[0], new RegExp('^' + verb + '.*may take a few seconds', 's'), operation);
+        const name = operation === 'runEncrypt' ? instance.downloads[0][0] : instance.downloads[0][0].name;
+        assert.equal(instance.status.textContent, 'Download started: ' + name, operation);
+        assert.doesNotMatch(instance.statuses.join('\n'), /\bsaved\b/i, operation);
+        assert.equal(instance.status.dataset.tone, 'info', operation);
+        assert.deepEqual([...instance.buttonLabels], [instance.buttonLabel], operation + ' keeps the button label fixed');
+    }
+});
+
+test('primary action labels are a fixed neutral Encrypt / Decrypt', async () => {
+    assert.match(source, /<input id="encrypt-button" type="submit" value="Encrypt">/);
+    assert.match(await artifact(), /<input id="decrypt-button" type="submit" value="Decrypt">/);
+});
+
 async function artifact(options = {}) {
     const encryptor = page(source, password, password, options);
     await encryptor.run('runEncrypt');
-    assert.equal(encryptor.status.textContent, '');
     assert.equal(encryptor.downloads.length, 1);
+    assert.equal(encryptor.status.textContent, 'Download started: ' + encryptor.downloads[0][0]);
     assert.equal(encryptor.derivations[0].iterations, 600000);
     assert.equal(encryptor.derivations[0].hash.name, 'SHA-256');
     return new TextDecoder().decode(encryptor.downloads[0][1]);
@@ -154,8 +247,8 @@ test('new artifacts use the fixed cryptographic profile and a 96-bit IV', async 
     }
 });
 
-function assertRecovered(decryptor) {
-    assert.equal(decryptor.status.textContent, '');
+function assertRecovered(decryptor, status = 'Download started: ' + filename) {
+    assert.equal(decryptor.status.textContent, status);
     assert.equal(decryptor.downloads.length, 1);
     assert.equal(decryptor.downloads[0][0].name, filename);
     assert.deepEqual(decryptor.downloads[0][0].content, bytes);
@@ -179,7 +272,7 @@ test('file-read failures preserve diagnostics and restore the encrypt button', a
         const encryptor = page(source, password, password, { readError });
         await encryptor.run('runEncrypt');
         assert.equal(encryptor.status.textContent, 'Encryption failed: ' + detail);
-        assert.equal(encryptor.button.value, 'Encrypt file');
+        assert.equal(encryptor.button.value, 'Encrypt');
         assert.equal(encryptor.derivations.length, 0);
         assert.equal(encryptor.downloads.length, 0);
     }
@@ -232,17 +325,17 @@ test('file and message containers have fresh neutral names and keep original nam
         const names = [];
         for (let attempt = 0; attempt < 2; attempt++) {
             await encryptor.run('submit');
-            assert.equal(encryptor.status.textContent, '');
             assert.equal(encryptor.downloads.length, attempt + 1);
             const [name, buffer] = encryptor.downloads[attempt];
             assert.match(name, containerNamePattern);
+            assert.equal(encryptor.status.textContent, 'Download started: ' + name);
             names.push(name);
             const html = new TextDecoder().decode(buffer);
             const wrapper = html.replace(/("encrypted":")[^"]*"/, '$1"');
             assert.ok(!wrapper.includes(originalName), 'wrapper does not disclose the original filename');
             const decryptor = page(html);
             await decryptor.run('submit');
-            assert.equal(decryptor.status.textContent, '');
+            assert.equal(decryptor.status.textContent, 'Download started: ' + originalName);
             assert.equal(decryptor.downloads.length, 1);
             assert.equal(decryptor.downloads[0][0].name, originalName);
             assert.deepEqual(decryptor.downloads[0][0].content,
@@ -377,7 +470,8 @@ for (const [name, secret] of [['legacy-password', password], ['legacy-empty', ''
     test(`${name} artifact still decrypts`, async () => {
         const decryptor = page(readFileSync(new URL(`fixtures/${name}.html`, import.meta.url), 'utf8'), secret);
         await decryptor.run('runDecrypt');
-        assertRecovered(decryptor);
+        // Legacy decryptors predate the download-started status.
+        assertRecovered(decryptor, '');
     });
 }
 
@@ -419,7 +513,7 @@ for (const [label, payload] of [
         const decryptor = page(embeddedPayload(html, payload));
         await decryptor.run('runDecrypt');
         assert.match(decryptor.status.textContent, /Decryption failed:/);
-        assert.equal(decryptor.button.value, 'Decrypt file');
+        assert.equal(decryptor.button.value, 'Decrypt');
         assert.equal(decryptor.downloads.length, 0);
         decryptor.fields.data.textContent = html.match(/<script id="data"[^>]*>([\s\S]*?)<\/script>/)[1];
         await decryptor.run('runDecrypt');
@@ -549,7 +643,7 @@ test('a 1 MiB binary file roundtrips with a Unicode filename', async () => {
     await encryptor.run('runEncrypt');
     const decryptor = page(new TextDecoder().decode(encryptor.downloads[0][1]));
     await decryptor.run('runDecrypt');
-    assert.equal(decryptor.status.textContent, '');
+    assert.equal(decryptor.status.textContent, 'Download started: ' + name);
     assert.equal(decryptor.downloads.length, 1);
     const file = decryptor.downloads[0][0];
     assert.equal(file.name, name);
@@ -561,7 +655,7 @@ test('an empty file roundtrips with its Unicode filename', async () => {
     const html = await artifact({ bytes: new Uint8Array(0), filename: 'empty-🔐.bin' });
     const decryptor = page(html);
     await decryptor.run('submit');
-    assert.equal(decryptor.status.textContent, '');
+    assert.equal(decryptor.status.textContent, 'Download started: empty-🔐.bin');
     assert.equal(decryptor.downloads.length, 1);
     assert.equal(decryptor.downloads[0][0].name, 'empty-🔐.bin');
     assert.deepEqual(decryptor.downloads[0][0].content, new Uint8Array(0));
@@ -580,6 +674,6 @@ test('empty file content and malformed decrypted headers are handled', async () 
     const invalid = page(new TextDecoder().decode(encryptor.downloads[0][1]));
     await invalid.run('runDecrypt');
     assert.match(invalid.status.textContent, /Decryption failed: Decrypted data is corrupted/);
-    assert.equal(invalid.button.value, 'Decrypt file');
+    assert.equal(invalid.button.value, 'Decrypt');
     assert.equal(invalid.downloads.length, 0);
 });

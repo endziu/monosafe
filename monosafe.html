@@ -79,6 +79,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .password-match[data-match=true] .strength-light { background: #76d99b; }
         .status, noscript { color: #ff8a8a; line-height: 1.5; }
         .status { margin: 16px 0 0; }
+        .status[data-tone=info] { color: #9ca3af; }
         .status:empty { display: none; }
         noscript { display: block; }
         @media (max-width: 380px) { main { padding: 24px 20px; } }
@@ -142,7 +143,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 <label class="visually-hidden" for="password_hint">Password hint</label>
                 <textarea class="field" id="password_hint" rows="2" placeholder="A reference to something only we would know"></textarea>
             </details>
-            <input id="encrypt-button" type="submit" value="Encrypt file">
+            <input id="encrypt-button" type="submit" value="Encrypt">
         </form>
         <p id="encrypt-status" class="status" role="status" aria-live="polite"></p>
     </main>
@@ -406,6 +407,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             return new TextEncoder('utf-8').encode(decryptor_html);
         }
 
+        // Keep the object URL and anchor alive long enough for the browser to begin the download.
+        const DOWNLOAD_CLEANUP_DELAY_MS = 10000;
+
         function download(filename, buffer) {
             const a = document.createElement('a');
             a.style = 'display: none';
@@ -417,19 +421,28 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             a.href = url;
             a.download = filename;
             a.click();
-            window.URL.revokeObjectURL(url);
+            setTimeout(() => {
+                window.URL.revokeObjectURL(url);
+                if (a.parentNode) a.parentNode.removeChild(a);
+            }, DOWNLOAD_CLEANUP_DELAY_MS);
+        }
+
+        // tone: 'error' (default) or 'info' for progress and success messages.
+        function setStatus(message, tone) {
+            const status = document.getElementById('encrypt-status');
+            status.textContent = message;
+            status.dataset.tone = tone || 'error';
         }
 
         function runEncrypt() {
-            const status = document.getElementById('encrypt-status');
-            status.textContent = '';
+            setStatus('');
 
             if (window.isSecureContext === false) {
-                status.textContent = 'This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.';
+                setStatus('This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.');
                 return;
             }
             if (!window.crypto || !window.crypto.subtle) {
-                status.textContent = 'Your browser does not support the Web Crypto API.';
+                setStatus('Your browser does not support the Web Crypto API.');
                 return;
             }
 
@@ -437,27 +450,27 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             const file = document.getElementById('file').files[0];
             const message = document.getElementById('message').value;
             if (messageSelected && message.length === 0) {
-                status.textContent = 'Write a text message first.';
+                setStatus('Write a text message first.');
                 return;
             }
             if (!messageSelected && !file) {
-                status.textContent = 'Select a file first.';
+                setStatus('Select a file first.');
                 return;
             }
             const password = document.getElementById('password').value;
             if (password.length === 0) {
-                status.textContent = 'Enter a long, unique passphrase before encrypting.';
+                setStatus('Enter a long, unique passphrase before encrypting.');
                 return;
             }
             if (password != document.getElementById('password_repeated').value) {
-                status.textContent = 'Passwords must match.';
+                setStatus('Passwords must match.');
                 return;
             }
             const hint = document.getElementById('password_hint').value.trim();
 
             const encryptButton = document.getElementById('encrypt-button');
             encryptButton.disabled = true;
-            encryptButton.value = 'Encrypting…';
+            setStatus('Encrypting… This may take a few seconds.', 'info');
 
             const salt = getRandomBytes(16);
             const iv = getRandomBytes(CRYPTO_PROFILE.ivLength);
@@ -472,13 +485,16 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 .then(payload_bytes => deriveKey(password, salt)
                     .then(key => encrypt(key, iv, payload_bytes)))
                 .then(buffer => serialize(salt, iv, buffer, hint))
-                .then(buffer => download(containerFilename(), buffer))
+                .then(buffer => {
+                    const name = containerFilename();
+                    download(name, buffer);
+                    setStatus('Download started: ' + name, 'info');
+                })
                 .catch(e => {
-                    status.textContent = 'Encryption failed: ' + (e.message || e.name);
+                    setStatus('Encryption failed: ' + (e.message || e.name));
                 })
                 .finally(() => {
                     encryptButton.disabled = false;
-                    encryptButton.value = 'Encrypt file';
                 });
         }
 
@@ -508,7 +524,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         <form id="decrypt-form" style="display:none">
             <input id="password" class="field" type="password" aria-label="Password" placeholder="Password" autocomplete="current-password" aria-describedby="password-hint" autofocus>
             <p class="password-hint muted" id="password-hint" hidden></p>
-            <input id="decrypt-button" type="submit" value="Decrypt file">
+            <input id="decrypt-button" type="submit" value="Decrypt">
         </form>
         <p id="decrypt-status" class="status" role="status" aria-live="polite"></p>
     </main>
@@ -517,6 +533,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     <\/script>
     <script>
         var CRYPTO_PROFILE = ${JSON.stringify(CRYPTO_PROFILE)};
+        var DOWNLOAD_CLEANUP_DELAY_MS = ${DOWNLOAD_CLEANUP_DELAY_MS};
 
         if (window.crypto && !window.crypto.subtle && window.crypto.webkitSubtle) {
             window.crypto.subtle = window.crypto.webkitSubtle;
@@ -602,27 +619,35 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             a.href = url;
             a.download = file.name;
             a.click();
+            // Keep the object URL and anchor alive long enough for the browser to begin the download.
             setTimeout(function () {
                 window.URL.revokeObjectURL(url);
-            }, 10000);
+                if (a.parentNode) a.parentNode.removeChild(a);
+            }, DOWNLOAD_CLEANUP_DELAY_MS);
+        }
+
+        // tone: 'error' (default) or 'info' for progress and success messages.
+        function setStatus(message, tone) {
+            var status = document.getElementById('decrypt-status');
+            status.textContent = message;
+            status.dataset.tone = tone || 'error';
         }
 
         function runDecrypt() {
-            var status = document.getElementById('decrypt-status');
-            status.textContent = '';
+            setStatus('');
 
             if (window.isSecureContext === false) {
-                status.textContent = 'This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.';
+                setStatus('This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.');
                 return;
             }
             if (!window.crypto || !window.crypto.subtle) {
-                status.textContent = 'Your browser does not support the Web Crypto API.';
+                setStatus('Your browser does not support the Web Crypto API.');
                 return;
             }
 
             var decryptButton = document.getElementById('decrypt-button');
             decryptButton.disabled = true;
-            decryptButton.value = 'Decrypting…';
+            setStatus('Decrypting… This may take a few seconds.', 'info');
 
             setTimeout(function () {
                 Promise.resolve().then(function () {
@@ -640,13 +665,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                         throw 'Wrong password or corrupted file.';
                     })
                     .then(extractDecryptedFile)
-                    .then(download)
+                    .then(function (file) {
+                        download(file);
+                        setStatus('Download started: ' + file.name, 'info');
+                    })
                     .catch(function (e) {
-                        status.textContent = 'Decryption failed: ' + e;
+                        setStatus('Decryption failed: ' + e);
                     })
                     .then(function () {
                         decryptButton.disabled = false;
-                        decryptButton.value = 'Decrypt file';
                     });
             }, 0);
         }
