@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const source = readFileSync(process.argv[2] || new URL('../polysafe.html', import.meta.url), 'utf8');
+const source = readFileSync(process.argv[2] || new URL('../monosafe.html', import.meta.url), 'utf8');
 const sizeMiB = Number(process.argv[3] || 8);
 assert.ok(Number.isInteger(sizeMiB) && sizeMiB >= 1 && sizeMiB <= 32, 'use 1–32 MiB');
 const context = vm.createContext({ Uint8Array, TextDecoder, atob });

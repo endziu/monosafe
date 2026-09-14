@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import { test } from 'node:test';
 
-const source = readFileSync(new URL('../polysafe.html', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../monosafe.html', import.meta.url), 'utf8');
 const bytes = Uint8Array.of(0, 255, 47, 128, 10);
 const filename = 'private-zażółć.bin';
 const password = ' long unique test passphrase 🔐 ';
