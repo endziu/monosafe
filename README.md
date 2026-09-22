@@ -11,7 +11,7 @@ No accounts, no servers, no installs. Everything happens on your own computer.
 1. Open `monosafe.html` in your browser. If you're using the hosted page, choose **Download MonoSafe for offline use** first, then open the downloaded `monosafe.html` whenever you need it.
 2. Pick a file, or write a message.
 3. Choose a strong passphrase (and optionally a hint for the recipient).
-4. Click **Encrypt** and save the HTML file it gives you.
+4. Click **Encrypt** and save the HTML file it gives you. Where your device can share files (most phones, Safari on macOS, Chrome or Edge on Windows and ChromeOS), you get **Share…** and **Download** buttons instead. **Share…** opens the system share sheet so you can send the file straight to email, Slack, Discord or another app. Send the passphrase another way.
 
 **To unlock it:**
 

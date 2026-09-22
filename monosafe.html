@@ -90,6 +90,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .status { margin: 16px 0 0; }
         .status[data-tone=info] { color: #9ca3af; }
         .status:empty { margin: 0; }
+        .result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+        .result-actions[hidden] { display: none; }
+        .result-actions button { min-height: 48px; padding: 12px; border: 0; border-radius: 8px; background: #252a34; color: #f1f3f5; font-weight: 600; cursor: pointer; }
+        .result-actions button:hover { background: #2f3541; }
+        #share-button { background: #6d5ee8; color: white; }
+        #share-button:hover { background: #5e4ed6; }
         noscript { display: block; }
         @media (max-width: 380px) { main { padding: 24px 20px; } }
     </style>
@@ -119,6 +125,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 <p>Encrypt a file or message into a password-protected HTML file. It decrypts in any modern browser.</p>
                 <p>Everything stays on your computer. Download MonoSafe with the arrow above to use it offline.</p>
                 <p>Use a long, unique password. Anyone with the encrypted file can try to guess it.</p>
+                <p>Where your device supports it, you can share the encrypted file straight to email or chat apps. Send the password another way.</p>
             </div>
         </dialog>
         <noscript>JavaScript is required to encrypt files and messages.</noscript>
@@ -177,6 +184,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             <input id="encrypt-button" type="submit" value="Encrypt">
         </form>
         <p id="encrypt-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="encrypt-result" class="result-actions" hidden>
+            <button type="button" id="share-button">Share…</button>
+            <button type="button" id="save-button">Download</button>
+        </div>
     </main>
     <script>
         'use strict';
@@ -467,8 +478,49 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             status.dataset.tone = tone || 'error';
         }
 
+        // The container awaiting Share or Download, where the browser can share files.
+        let pendingResult = null;
+
+        // Returns the container as a shareable File, or null where the browser cannot share it.
+        function shareableFile(name, buffer) {
+            const nav = window.navigator;
+            if (!nav || !nav.share || !nav.canShare) return null;
+            try {
+                const file = new File([buffer], name, { type: 'text/html' });
+                return nav.canShare({ files: [file] }) ? file : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function showResult(result) {
+            pendingResult = result;
+            document.getElementById('encrypt-result').hidden = !result;
+        }
+
+        function shareResult() {
+            const result = pendingResult;
+            if (!result) return;
+            // Share within the click itself: the Encrypt click's user activation is gone after key derivation.
+            window.navigator.share({ files: [result.file], title: 'MonoSafe encrypted file' })
+                .then(() => setStatus('Shared: ' + result.name, 'info'))
+                .catch(e => {
+                    // Dismissing the share sheet is not a failure.
+                    if (e && e.name === 'AbortError') return;
+                    setStatus('Sharing failed: ' + ((e && (e.message || e.name)) || e) + '. Use Download instead.');
+                });
+        }
+
+        function saveResult() {
+            const result = pendingResult;
+            if (!result) return;
+            download(result.name, result.buffer);
+            setStatus('Download started: ' + result.name, 'info');
+        }
+
         function runEncrypt() {
             setStatus('');
+            showResult(null);
 
             if (window.isSecureContext === false) {
                 setStatus('This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.');
@@ -521,6 +573,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 .then(buffer => serialize(salt, iv, buffer, hint))
                 .then(buffer => {
                     const name = containerFilename();
+                    const file = shareableFile(name, buffer);
+                    if (file) {
+                        showResult({ name, buffer, file });
+                        setStatus('Encrypted: ' + name + '. Share it or download it.', 'info');
+                        return;
+                    }
                     download(name, buffer);
                     setStatus('Download started: ' + name, 'info');
                 })
@@ -536,6 +594,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             e.preventDefault();
             runEncrypt();
         });
+        document.getElementById('share-button').addEventListener('click', shareResult);
+        document.getElementById('save-button').addEventListener('click', saveResult);
         document.getElementById('encrypt-form').style.display = 'grid';
 
         const DECRYPTOR_TEMPLATE =

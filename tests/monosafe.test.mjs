@@ -51,6 +51,8 @@ function page(html, secret = password, repeated = secret, options = {}) {
         'encrypt-form': form, 'decrypt-form': form,
         'encrypt-button': button, 'decrypt-button': button,
         'encrypt-status': status, 'decrypt-status': status,
+        'encrypt-result': { hidden: true },
+        'share-button': eventTarget(), 'save-button': eventTarget(),
         'page-style': { textContent: stylesheet(html) },
         password_hint: { value: options.hint || '' },
         'source-file': eventTarget({ checked: options.source !== 'message' }),
@@ -92,7 +94,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
     };
     let reads = 0;
     const context = vm.createContext({
-        TextEncoder, TextDecoder, Uint8Array, Blob, DOMException, atob,
+        TextEncoder, TextDecoder, Uint8Array, Blob, File, DOMException, atob,
         setTimeout: (callback, delay) => {
             timers.push(delay);
             const guarded = () => {
@@ -448,6 +450,117 @@ test('form submissions encrypt and decrypt without navigating', async () => {
     assert.equal(decryptor.form.style.display, 'grid');
     await decryptor.run('submit');
     assertRecovered(decryptor);
+});
+
+// A navigator that can share files; canShare and share outcomes are configurable per test.
+function sharingNavigator({ canShare = () => true, share = () => Promise.resolve() } = {}) {
+    const checks = [];
+    const shares = [];
+    const navigator = {
+        canShare(data) { checks.push(data); return canShare(data); },
+        share(data) { shares.push(data); return share(data); }
+    };
+    return { navigator, checks, shares };
+}
+
+async function settle() {
+    await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+test('where files can be shared, encrypting offers Share and Download instead of downloading', async () => {
+    const sharing = sharingNavigator();
+    const encryptor = page(source, password, password, { window: { navigator: sharing.navigator } });
+    assert.equal(encryptor.fields['encrypt-result'].hidden, true);
+    await encryptor.run('runEncrypt');
+    assert.equal(encryptor.downloads.length, 0);
+    assert.equal(encryptor.fields['encrypt-result'].hidden, false);
+    const [file] = sharing.checks[0].files;
+    assert.match(file.name, containerNamePattern);
+    assert.equal(file.type, 'text/html');
+    assert.equal(encryptor.status.textContent, 'Encrypted: ' + file.name + '. Share it or download it.');
+    assert.equal(encryptor.status.dataset.tone, 'info');
+    const decryptor = page(new TextDecoder().decode(await file.arrayBuffer()));
+    await decryptor.run('runDecrypt');
+    assertRecovered(decryptor);
+});
+
+test('Share sends only the container and a neutral title, never the password or hint', async () => {
+    const hint = 'hint-that-must-not-travel';
+    const sharing = sharingNavigator();
+    const encryptor = page(source, password, password, { hint, window: { navigator: sharing.navigator } });
+    await encryptor.run('runEncrypt');
+    encryptor.fields['share-button'].dispatch('click');
+    await settle();
+    assert.equal(sharing.shares.length, 1);
+    const [data] = sharing.shares;
+    assert.deepEqual(Object.keys(data).sort(), ['files', 'title']);
+    assert.deepEqual(data.files, sharing.checks[0].files);
+    assert.ok(!data.title.includes(password) && !data.title.includes(hint));
+    assert.equal(encryptor.status.textContent, 'Shared: ' + data.files[0].name);
+    assert.equal(encryptor.status.dataset.tone, 'info');
+});
+
+test('dismissing the share sheet is silent; other share failures point to Download', async () => {
+    const dismissed = sharingNavigator({ share: () => Promise.reject(new DOMException('Share canceled', 'AbortError')) });
+    const encryptor = page(source, password, password, { window: { navigator: dismissed.navigator } });
+    await encryptor.run('runEncrypt');
+    const before = encryptor.status.textContent;
+    encryptor.fields['share-button'].dispatch('click');
+    await settle();
+    assert.equal(encryptor.status.textContent, before);
+    assert.equal(encryptor.fields['encrypt-result'].hidden, false);
+
+    const denied = sharingNavigator({ share: () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')) });
+    const failing = page(source, password, password, { window: { navigator: denied.navigator } });
+    await failing.run('runEncrypt');
+    failing.fields['share-button'].dispatch('click');
+    await settle();
+    assert.equal(failing.status.textContent, 'Sharing failed: Permission denied. Use Download instead.');
+    assert.equal(failing.status.dataset.tone, 'error');
+    assert.equal(failing.fields['encrypt-result'].hidden, false);
+});
+
+test('Download saves the same container that Share offers', async () => {
+    const sharing = sharingNavigator();
+    const encryptor = page(source, password, password, { window: { navigator: sharing.navigator } });
+    await encryptor.run('runEncrypt');
+    encryptor.fields['save-button'].dispatch('click');
+    const [file] = sharing.checks[0].files;
+    assert.equal(encryptor.downloads.length, 1);
+    assert.equal(encryptor.downloads[0][0], file.name);
+    assert.deepEqual(new Uint8Array(encryptor.downloads[0][1]), new Uint8Array(await file.arrayBuffer()));
+    assert.equal(encryptor.status.textContent, 'Download started: ' + file.name);
+});
+
+test('without file sharing, encrypting downloads immediately as before', async () => {
+    const refusing = sharingNavigator({ canShare: () => false });
+    const shareOnly = { share: () => Promise.resolve() };
+    for (const [label, navigator] of [['canShare false', refusing.navigator], ['no canShare', shareOnly], ['no navigator', undefined]]) {
+        const encryptor = page(source, password, password, { window: { navigator } });
+        await encryptor.run('runEncrypt');
+        assert.equal(encryptor.downloads.length, 1, label);
+        assert.match(encryptor.downloads[0][0], containerNamePattern, label);
+        assert.equal(encryptor.fields['encrypt-result'].hidden, true, label);
+        assert.equal(encryptor.status.textContent, 'Download started: ' + encryptor.downloads[0][0], label);
+    }
+});
+
+test('re-encrypting hides Share and Download until the new container is ready', async () => {
+    const sharing = sharingNavigator();
+    const encryptor = page(source, password, password, { window: { navigator: sharing.navigator } });
+    await encryptor.run('runEncrypt');
+    const visibility = [];
+    encryptor.fields['encrypt-result'] = {
+        get hidden() { return visibility[visibility.length - 1]; },
+        set hidden(value) { visibility.push(value); }
+    };
+    await encryptor.run('runEncrypt');
+    assert.deepEqual(visibility, [true, false]);
+    encryptor.fields['share-button'].dispatch('click');
+    await settle();
+    const [first, second] = sharing.checks.map(check => check.files[0]);
+    assert.notEqual(first.name, second.name);
+    assert.equal(sharing.shares[0].files[0], second);
 });
 
 test('new artifacts use stronger PBKDF2 and preserve filename and binary bytes', async () => {
