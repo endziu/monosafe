@@ -34,8 +34,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             border-radius: 12px;
             background: #171a21;
         }
-        h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
+        h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 24px; letter-spacing: -0.02em; }
         .intro { margin: 8px 0 24px; line-height: 1.5; }
+        .offline-download { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: #bcb3ff; }
+        .offline-download:hover { color: #d2ccff; background: #252a34; }
+        .offline-download svg { width: 18px; height: 18px; }
         form { display: grid; gap: 12px; }
         button, input, textarea { font-family: inherit; font-size: inherit; line-height: inherit; }
         :focus-visible { outline: 2px solid #8b7cf6; outline-offset: 2px; }
@@ -89,7 +92,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <body>
     <main>
-        <h1>MonoSafe</h1>
+        <h1>MonoSafe <a class="offline-download" href="monosafe.html" download="monosafe.html" aria-label="Download MonoSafe for offline use">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M12 3v12" />
+                <path d="m7 10 5 5 5-5" />
+                <path d="M5 21h14" />
+            </svg>
+        </a></h1>
         <p class="intro muted">Encrypt a file or text message into a self-decrypting HTML file.</p>
         <noscript>JavaScript is required to encrypt files and messages.</noscript>
         <form id="encrypt-form" style="display:none">

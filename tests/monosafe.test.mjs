@@ -242,6 +242,14 @@ test('primary action labels are a fixed neutral Encrypt / Decrypt', async () => 
     assert.match(await artifact(), /<input id="decrypt-button" type="submit" value="Decrypt">/);
 });
 
+test('the creator offers an accessible icon download link beside its title', () => {
+    const markup = markupOf(source);
+    const title = markup.match(/<h1>([\s\S]*?)<\/h1>/)?.[1];
+    assert.match(title, /^MonoSafe\s+<a\b/);
+    assert.match(title, /<a\b[^>]*class="offline-download"[^>]*href="monosafe\.html"[^>]*\bdownload="monosafe\.html"[^>]*aria-label="Download MonoSafe for offline use"[^>]*>/);
+    assert.match(title, /<svg\b[^>]*aria-hidden="true"[^>]*>/);
+});
+
 test('primary button text meets AA contrast in both stylesheets, including hover', async () => {
     function luminance(color) {
         const hex = color === 'white' ? 'ffffff' : color.replace('#', '');

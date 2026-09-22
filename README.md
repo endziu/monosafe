@@ -8,7 +8,7 @@ No accounts, no servers, no installs. Everything happens on your own computer.
 
 **To lock something:**
 
-1. Open `monosafe.html` in your browser.
+1. Open `monosafe.html` in your browser. If you're using the hosted page, choose **Download MonoSafe for offline use** first, then open the downloaded `monosafe.html` whenever you need it.
 2. Pick a file, or write a message.
 3. Choose a strong passphrase (and optionally a hint for the recipient).
 4. Click **Encrypt** and save the HTML file it gives you.
