@@ -59,6 +59,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
         'message-source': { hidden: true },
         message: { value: options.message || '' },
         'password-hint': { textContent: '', hidden: true },
+        'decrypted-message': { textContent: '', hidden: true },
         'password-strength': { dataset: {} },
         password_repeated: eventTarget({ value: repeated, id: 'password_repeated', type: 'password' }),
         'password-strength-status': { textContent: '' },
@@ -410,7 +411,7 @@ test('password toggles on both pages have stable names, expose state and preserv
 
 test('file and message containers have fresh neutral names and keep original names encrypted', async () => {
     for (const options of [{}, { source: 'message', message: 'Private café meeting 🔐' }]) {
-        const originalName = options.source === 'message' ? 'message.txt' : filename;
+        const privateContent = options.source === 'message' ? options.message : filename;
         const encryptor = page(source, password, password, options);
         const names = [];
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -422,14 +423,16 @@ test('file and message containers have fresh neutral names and keep original nam
             names.push(name);
             const html = new TextDecoder().decode(buffer);
             const wrapper = html.replace(/("encrypted":")[^"]*"/, '$1"');
-            assert.ok(!wrapper.includes(originalName), 'wrapper does not disclose the original filename');
+            assert.ok(!wrapper.includes(privateContent), 'wrapper does not disclose the message or original filename');
             const decryptor = page(html);
             await decryptor.run('submit');
-            assert.equal(decryptor.status.textContent, 'Download started: ' + originalName);
-            assert.equal(decryptor.downloads.length, 1);
-            assert.equal(decryptor.downloads[0][0].name, originalName);
-            assert.deepEqual(decryptor.downloads[0][0].content,
-                options.source === 'message' ? new TextEncoder().encode(options.message) : bytes);
+            if (options.source === 'message') {
+                assert.equal(decryptor.status.textContent, 'Message decrypted.');
+                assert.equal(decryptor.downloads.length, 0);
+                assert.equal(decryptor.fields['decrypted-message'].textContent, options.message);
+            } else {
+                assertRecovered(decryptor);
+            }
         }
         assert.notEqual(names[0], names[1], 'each encryption gets a fresh container name');
     }
@@ -458,8 +461,8 @@ test('new artifacts use stronger PBKDF2 and preserve filename and binary bytes',
     assert.equal(decryptor.derivations[0].hash.name, 'SHA-256');
 });
 
-test('text messages encrypt without file reading and decrypt as message.txt', async () => {
-    const message = 'Meet at 19:30 by the café.\nBring the 🔐 key.';
+test('text messages display literally without downloading and clear on a failed retry', async () => {
+    const message = 'Meet at 19:30 by the café.\nBring the 🔐 key. <img src=x onerror=alert(1)> </script>';
     const encryptor = page(source, password, password, { source: 'message', message });
     assert.equal(encryptor.fields['file-source'].hidden, true);
     assert.equal(encryptor.fields['message-source'].hidden, false);
@@ -474,8 +477,44 @@ test('text messages encrypt without file reading and decrypt as message.txt', as
 
     const decryptor = page(html);
     await decryptor.run('runDecrypt');
+    assert.equal(decryptor.downloads.length, 0);
+    assert.equal(decryptor.fields['decrypted-message'].textContent, message);
+    assert.equal(decryptor.fields['decrypted-message'].hidden, false);
+    assert.equal(decryptor.status.textContent, 'Message decrypted.');
+    decryptor.fields.password.value = 'wrong password';
+    await decryptor.run('runDecrypt');
+    assert.equal(decryptor.fields['decrypted-message'].textContent, '');
+    assert.equal(decryptor.fields['decrypted-message'].hidden, true);
+    assert.equal(decryptor.downloads.length, 0);
+});
+
+test('messages up to 1,000 characters display inline; longer messages download intact', async () => {
+    for (const length of [1000, 1001]) {
+        const message = '🔐'.repeat(length - 1) + '\n';
+        const decryptor = page(await artifact({ source: 'message', message }));
+        await decryptor.run('runDecrypt');
+        const output = decryptor.fields['decrypted-message'];
+        if (length === 1000) {
+            assert.equal(output.textContent, message);
+            assert.equal(output.hidden, false);
+            assert.equal(decryptor.downloads.length, 0);
+        } else {
+            assert.equal(output.textContent, '');
+            assert.equal(output.hidden, true);
+            assert.equal(decryptor.downloads.length, 1);
+            assert.equal(decryptor.downloads[0][0].name, 'message.txt');
+            assert.equal(new TextDecoder().decode(decryptor.downloads[0][0].content), message);
+            assert.equal(decryptor.status.textContent, 'Download started: message.txt');
+        }
+    }
+});
+
+test('a file named message.txt remains a file download', async () => {
+    const decryptor = page(await artifact({ filename: 'message.txt' }));
+    await decryptor.run('runDecrypt');
     assert.equal(decryptor.downloads[0][0].name, 'message.txt');
-    assert.equal(new TextDecoder().decode(decryptor.downloads[0][0].content), message);
+    assert.deepEqual(decryptor.downloads[0][0].content, bytes);
+    assert.equal(decryptor.fields['decrypted-message'].hidden, true);
 });
 
 test('empty text messages are rejected before key derivation', async () => {
@@ -575,10 +614,10 @@ test('generated decryptor discloses that only the encrypted content is authentic
     const html = await artifact();
     const notice = elementText(html, 'trust-notice');
     assert.match(notice, /encrypted contents are protected against tampering/i);
-    assert.match(notice, /this page, including any password hint, isn't/i);
-    assert.match(notice, /replace it with a copy that captures your password/i);
-    assert.match(notice, /source you trust/i);
-    assert.match(notice, /different password for each file/i);
+    assert.match(notice, /this page and its hint are not/i);
+    assert.match(notice, /only open files you trust/i);
+    assert.match(notice, /unique password/i);
+    assert.doesNotMatch(markupOf(html), /Enter the password to decrypt this file/);
     assert.doesNotMatch(notice, /\bCSP\b|content security policy|checksum|prevent/i);
     for (const id of ['password-hint', 'trust-notice']) {
         assert.ok(describedBy(html, 'password').includes(id));

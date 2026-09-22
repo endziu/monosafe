@@ -17,7 +17,7 @@ No accounts, no servers, no installs. Everything happens on your own computer.
 
 1. Open that HTML file in any browser.
 2. Type the passphrase and click **Decrypt**.
-3. The original file downloads.
+3. The original file downloads. Text messages up to 1,000 characters appear directly on the page; longer messages download as `message.txt`.
 
 The encrypted file is self-contained: whoever receives it needs nothing but a browser and the passphrase.
 

@@ -60,6 +60,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         .source-options input { position: absolute; width: 1px; min-height: 1px; opacity: 0; }
         .source-input[hidden] { display: none; }
         #message { min-height: 132px; }
+        #decrypted-message { white-space: pre-wrap; overflow-wrap: anywhere; }
         .message-note, .hint-note { margin: 6px 2px 0; font-size: 13px; line-height: 1.5; }
         .hint-option summary, .password-hint, .trust-notice { font-size: 13px; line-height: 1.5; }
         .trust-notice { margin: 0; }
@@ -507,7 +508,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             const salt = getRandomBytes(16);
             const iv = getRandomBytes(CRYPTO_PROFILE.ivLength);
 
-            const filename = messageSelected ? 'message.txt' : file.name;
+            // An empty encrypted filename marks a text message, not a downloadable file.
+            const filename = messageSelected ? '' : file.name;
             const content = messageSelected
                 ? Promise.resolve(new TextEncoder('utf-8').encode(message))
                 : readFile(file);
@@ -551,7 +553,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 <body>
     <main>
         <h1>MonoSafe</h1>
-        <p class="intro muted">Enter the password to decrypt this file.</p>
         <noscript>JavaScript is required to decrypt files.</noscript>
         <form id="decrypt-form" style="display:none">
             <label for="password">Password</label>
@@ -566,10 +567,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 </button>
             </div>
             <p class="password-hint muted" id="password-hint" hidden></p>
-            <p class="trust-notice muted" id="trust-notice">Only the encrypted contents are protected against tampering. This page, including any password hint, isn't: someone could replace it with a copy that captures your password. Open files only from a source you trust, and use a different password for each file.</p>
+            <p class="trust-notice muted" id="trust-notice">Only open files you trust. Use a unique password. The encrypted contents are protected against tampering; this page and its hint are not.</p>
             <input id="decrypt-button" type="submit" value="Decrypt">
         </form>
         <p id="decrypt-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="decrypted-message" aria-label="Decrypted message" hidden></div>
     </main>
     <script id="data" type="application/json">
         {{___PAYLOAD___}}
@@ -577,6 +579,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     <script>
         var CRYPTO_PROFILE = ${JSON.stringify(CRYPTO_PROFILE)};
         var DOWNLOAD_CLEANUP_DELAY_MS = ${DOWNLOAD_CLEANUP_DELAY_MS};
+        var INLINE_MESSAGE_LIMIT = 1000;
 
         document.getElementById('password-toggle').addEventListener('click', function () {
             var input = document.getElementById(this.getAttribute('aria-controls'));
@@ -685,6 +688,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
         function runDecrypt() {
             setStatus('');
+            var message = document.getElementById('decrypted-message');
+            message.textContent = '';
+            message.hidden = true;
 
             if (window.isSecureContext === false) {
                 setStatus('This insecure context prevents Web Crypto use. Open this page over HTTPS or as a local file in a supported browser.');
@@ -716,6 +722,16 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                     })
                     .then(extractDecryptedFile)
                     .then(function (file) {
+                        if (file.name === '') {
+                            var text = new TextDecoder('utf-8').decode(file.content);
+                            if (Array.from(text).length <= INLINE_MESSAGE_LIMIT) {
+                                message.textContent = text;
+                                message.hidden = false;
+                                setStatus('Message decrypted.', 'info');
+                                return;
+                            }
+                            file.name = 'message.txt';
+                        }
                         download(file);
                         setStatus('Download started: ' + file.name, 'info');
                     })
