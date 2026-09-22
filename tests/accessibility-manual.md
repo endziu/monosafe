@@ -8,10 +8,11 @@ Record the browser, screen reader, versions, date, and results in the PR or
 issue when performing this check.
 
 1. Open `monosafe.html` locally with a screen reader running. Using only the
-   keyboard, choose **Text message** and enter a short test message. Tab through
-   both password fields, their visibility buttons, the optional hint, and
-   **Encrypt**. Verify logical focus order, visible focus, and persistent
-   **Password** / **Repeat password** labels.
+   keyboard, open **Help**, then close the dialog with Escape and verify focus
+   returns to the help button. Choose **Text message** and enter a short test
+   message. Tab through both password fields, their visibility buttons, the
+   optional hint, and **Encrypt**. Verify logical focus order, visible focus,
+   and persistent **Password** / **Repeat password** labels.
 2. Enter `short`, then `MapleRiver7`, then `cedar orbit velvet harbor`. Verify
    visible and spoken strength feedback changes to low, medium, and high.
    Enter a different repeated password, then a matching one. Verify both

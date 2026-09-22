@@ -34,11 +34,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             border-radius: 12px;
             background: #171a21;
         }
-        h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 24px; letter-spacing: -0.02em; }
-        .intro { margin: 8px 0 24px; line-height: 1.5; }
-        .offline-download { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: #bcb3ff; }
-        .offline-download:hover { color: #d2ccff; background: #252a34; }
-        .offline-download svg { width: 18px; height: 18px; }
+        h1 { display: flex; align-items: center; gap: 8px; margin: 0 0 24px; font-size: 24px; letter-spacing: -0.02em; }
+        .icon-button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #bcb3ff; cursor: pointer; }
+        .icon-button:hover { color: #d2ccff; background: #252a34; }
+        .icon-button svg { width: 18px; height: 18px; }
+        dialog { width: min(400px, calc(100% - 48px)); border: 1px solid #343a46; border-radius: 12px; background: #171a21; color: #f1f3f5; }
+        dialog::backdrop { background: rgb(0 0 0 / 70%); }
+        .help-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .help-header h2 { margin: 0; font-size: 20px; }
+        .help-copy { line-height: 1.5; }
         form { display: grid; gap: 12px; }
         button, input, textarea { font-family: inherit; font-size: inherit; line-height: inherit; }
         :focus-visible { outline: 2px solid #8b7cf6; outline-offset: 2px; }
@@ -92,14 +96,30 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 <body>
     <main>
-        <h1>MonoSafe <a class="offline-download" href="monosafe.html" download="monosafe.html" aria-label="Download MonoSafe for offline use">
+        <h1>MonoSafe <a class="icon-button" href="monosafe.html" download="monosafe.html" aria-label="Download MonoSafe for offline use">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                 <path d="M12 3v12" />
                 <path d="m7 10 5 5 5-5" />
                 <path d="M5 21h14" />
             </svg>
-        </a></h1>
-        <p class="intro muted">Encrypt a file or text message into a self-decrypting HTML file.</p>
+        </a><button class="icon-button" type="button" id="help-button" aria-label="Help">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.5 9a2.5 2.5 0 1 1 4.2 1.8c-.9.8-1.7 1.3-1.7 2.7" />
+                <path d="M12 16.5h.01" />
+            </svg>
+        </button></h1>
+        <dialog id="help-dialog" aria-labelledby="help-title">
+            <div class="help-header">
+                <h2 id="help-title">MonoSafe</h2>
+                <button class="icon-button" type="button" id="help-close" aria-label="Close help">×</button>
+            </div>
+            <div class="help-copy muted">
+                <p>Encrypt a file or message into a password-protected HTML file. It decrypts in any modern browser.</p>
+                <p>Everything stays on your computer. Download MonoSafe with the arrow above to use it offline.</p>
+                <p>Use a long, unique password. Anyone with the encrypted file can try to guess it.</p>
+            </div>
+        </dialog>
         <noscript>JavaScript is required to encrypt files and messages.</noscript>
         <form id="encrypt-form" style="display:none">
             <fieldset class="source-options" aria-label="Content to encrypt">
@@ -112,7 +132,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             <div class="source-input" id="message-source" hidden>
                 <label class="visually-hidden" for="message">Text message to encrypt</label>
                 <textarea class="field" id="message" rows="5" placeholder="Write a private message"></textarea>
-                <p class="muted message-note">The decrypted message will be saved as message.txt.</p>
             </div>
             <label for="password">Password</label>
             <div class="password-field">
@@ -150,7 +169,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             </div>
             <details class="hint-option">
                 <summary class="muted">Add password hint (optional)</summary>
-                <p class="muted hint-note" id="password-hint-note">Not encrypted: anyone who opens the file can read the hint, and anyone can change it without the password.</p>
+                <p class="muted hint-note" id="password-hint-note">Public and editable — don't put secrets here.</p>
                 <label class="visually-hidden" for="password_hint">Password hint</label>
                 <textarea class="field" id="password_hint" rows="2" aria-describedby="password-hint-note" placeholder="A reference to something only we would know"></textarea>
             </details>
@@ -172,6 +191,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             const button = document.getElementById(id);
             button.addEventListener('click', () => togglePasswordVisibility(button));
         }
+
+        const helpDialog = document.getElementById('help-dialog');
+        document.getElementById('help-button').addEventListener('click', () => helpDialog.showModal());
+        document.getElementById('help-close').addEventListener('click', () => helpDialog.close());
 
         // A lightweight complexity estimate, not a prediction of cracking time.
         function passwordStrength(password) {

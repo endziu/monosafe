@@ -45,6 +45,9 @@ function page(html, secret = password, repeated = secret, options = {}) {
         password: eventTarget({ value: secret, id: 'password', type: 'password' }),
         'password-toggle': eventTarget(attributes('password-toggle')),
         'password-repeated-toggle': eventTarget(attributes('password-repeated-toggle')),
+        'help-button': eventTarget(attributes('help-button')),
+        'help-close': eventTarget(attributes('help-close')),
+        'help-dialog': eventTarget({ showModal() { this.open = true; }, close() { this.open = false; } }),
         'encrypt-form': form, 'decrypt-form': form,
         'encrypt-button': button, 'decrypt-button': button,
         'encrypt-status': status, 'decrypt-status': status,
@@ -242,12 +245,25 @@ test('primary action labels are a fixed neutral Encrypt / Decrypt', async () => 
     assert.match(await artifact(), /<input id="decrypt-button" type="submit" value="Decrypt">/);
 });
 
-test('the creator offers an accessible icon download link beside its title', () => {
+test('the creator offers accessible icon controls beside its title', () => {
     const markup = markupOf(source);
     const title = markup.match(/<h1>([\s\S]*?)<\/h1>/)?.[1];
     assert.match(title, /^MonoSafe\s+<a\b/);
-    assert.match(title, /<a\b[^>]*class="offline-download"[^>]*href="monosafe\.html"[^>]*\bdownload="monosafe\.html"[^>]*aria-label="Download MonoSafe for offline use"[^>]*>/);
+    assert.match(title, /<a\b[^>]*class="icon-button"[^>]*href="monosafe\.html"[^>]*\bdownload="monosafe\.html"[^>]*aria-label="Download MonoSafe for offline use"[^>]*>/);
+    assert.match(title, /<button\b[^>]*id="help-button"[^>]*aria-label="Help"[^>]*>/);
     assert.match(title, /<svg\b[^>]*aria-hidden="true"[^>]*>/);
+});
+
+test('the help icon opens a concise modal', () => {
+    const instance = page(source);
+    const { fields } = instance;
+    assert.match(markupOf(source), /<dialog id="help-dialog" aria-labelledby="help-title">/);
+    assert.match(elementText(source, 'help-dialog'), /Everything stays on your computer/);
+    assert.equal(fields['help-dialog'].open, undefined);
+    fields['help-button'].dispatch('click');
+    assert.equal(fields['help-dialog'].open, true);
+    fields['help-close'].dispatch('click');
+    assert.equal(fields['help-dialog'].open, false);
 });
 
 test('primary button text meets AA contrast in both stylesheets, including hover', async () => {
@@ -547,11 +563,10 @@ test('both pages declare English and give password fields visible associated lab
     }
 });
 
-test('creator hint copy discloses visibility and mutability before hint entry', () => {
+test('creator hint copy briefly discloses visibility and mutability before hint entry', () => {
     const note = elementText(source, 'password-hint-note');
-    assert.match(note, /not encrypted/i);
-    assert.match(note, /anyone who opens the file can read/i);
-    assert.match(note, /change it without the password/i);
+    assert.match(note, /public and editable/i);
+    assert.match(note, /don't put secrets here/i);
     assert.ok(describedBy(source, 'password_hint').includes('password-hint-note'));
     assert.ok(source.indexOf('id="password-hint-note"') < source.indexOf('id="password_hint"'), 'note precedes the hint input');
 });
