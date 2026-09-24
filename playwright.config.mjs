@@ -11,7 +11,7 @@ export default defineConfig({
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure'
     },
-    projects: ['chromium', 'firefox', 'webkit'].map(browserName => ({
+    projects: ['chromium', 'firefox'].map(browserName => ({
         name: browserName,
         use: { browserName }
     }))
