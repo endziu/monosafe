@@ -1,8 +1,8 @@
 # Password accessibility spot check
 
-Run this manual keyboard and screen-reader check in addition to `make test`.
-The page simulation cannot establish actual focus behavior or screen-reader
-announcements.
+Run this manual keyboard and screen-reader check in addition to `make test`
+and `make test-browser`. Browser tests cover basic keyboard controls and focus,
+but cannot establish screen-reader announcements or the full manual experience.
 
 Record the browser, screen reader, versions, date, and results in the PR or
 issue when performing this check.

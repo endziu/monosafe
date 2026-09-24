@@ -1,4 +1,4 @@
-.PHONY: build deploy test clear
+.PHONY: build deploy test test-browser clear
 
 build:
 	mkdir -p dist
@@ -11,6 +11,9 @@ deploy: build
 
 test:
 	node --test tests/*.test.mjs
+
+test-browser:
+	npm run test:browser
 
 clear:
 	rm -f dist/index.html dist/monosafe.html dist/CNAME

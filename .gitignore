@@ -7,6 +7,10 @@ npm-debug.log*
 yarn-error.log*
 .npm/
 
+# Browser test artifacts
+/test-results/
+/playwright-report/
+
 # Environment / secrets
 .env
 .env.*

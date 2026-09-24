@@ -33,8 +33,8 @@ The encrypted file is self-contained: whoever receives it needs nothing but a br
 
 ## Development
 
-Use Node.js 24 or newer and GNU Make in a Unix-like environment. The tests
-use Node's built-in test runner; no npm dependencies are needed.
+Use Node.js 24 or newer and GNU Make in a Unix-like environment. The routine
+`make test` suite uses Node's built-in test runner; no npm dependencies are needed.
 
 ```
 make test     # run application tests and isolated build checks
@@ -47,7 +47,37 @@ pushes to `main`. Build tests verify both HTML copies and `CNAME`, including
 replacement of stale output, in temporary directories without touching your
 local `dist/`.
 
-For keyboard and screen-reader testing, also follow the
+### Browser smoke tests
+
+Install the development dependency and Playwright's browsers once:
+
+```sh
+npm ci
+npx playwright install chromium firefox webkit
+make test-browser
+```
+
+On supported Linux distributions, use `npx playwright install --with-deps`
+to install required system libraries too. This may require administrator
+privileges. For a single browser, run
+`npm run test:browser -- --project=chromium`. On unsupported distributions such
+as Arch Linux, WebKit may lack compatible libraries; use a supported environment
+or the Ubuntu CI job for the full matrix.
+
+The five smoke tests run in Chromium, Firefox, and WebKit. They open the creator
+and generated HTML as local files with HTTP(S) and WebSocket requests blocked,
+use real WebCrypto and downloads, and cover file recovery, wrong-password retries, literal message
+and hint display, source switching/reset, keyboard controls, and native form
+validation. No OS share sheet is automated; the existing Node suite covers its
+API outcomes.
+
+A separate GitHub Actions job runs all three browsers on Ubuntu. Failed runs
+retain traces and screenshots in the `browser-test-failures` artifact for seven
+days. Locally, inspect a trace with `npx playwright show-trace <path-to-trace.zip>`
+under `test-results/`.
+
+Browser checks do not establish screen-reader announcements or replace manual
+accessibility testing. Also follow the
 [manual accessibility checks](tests/accessibility-manual.md).
 
 ## Credits
