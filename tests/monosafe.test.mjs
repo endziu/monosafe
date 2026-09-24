@@ -175,6 +175,13 @@ function page(html, secret = password, repeated = secret, options = {}) {
     return {
         context, status, statuses, button, buttonLabel, observedButtonValues, fields, form, downloads, derivations, derivationStatuses,
         randomValues, keyAlgorithms, operations, timerErrors, timers, urls, anchors, body, get reads() { return reads; },
+        selectSource(name) {
+            assert.ok(name === 'file' || name === 'message');
+            // Native radio groups update both checked states, then fire change on the selected input.
+            fields['source-file'].checked = name === 'file';
+            fields['source-message'].checked = name === 'message';
+            fields['source-' + name].dispatch('change');
+        },
         async run(name) {
             if (name === 'submit') {
                 let prevented = false;
@@ -606,6 +613,82 @@ test('new artifacts use stronger PBKDF2 and preserve filename and binary bytes',
     assertRecovered(decryptor);
     assert.equal(decryptor.derivations[0].iterations, 600000);
     assert.equal(decryptor.derivations[0].hash.name, 'SHA-256');
+});
+
+test('source changes toggle the visible input without clearing content or starting encryption', () => {
+    const message = 'Keep this draft 🔐';
+    const encryptor = page(source, password, password, { message });
+    const { fields } = encryptor;
+    const selectedFile = fields.file.files[0];
+    assert.equal(fields['file-source'].hidden, false);
+    assert.equal(fields['message-source'].hidden, true);
+
+    for (const selected of ['message', 'file', 'message']) {
+        encryptor.selectSource(selected);
+        assert.equal(fields['file-source'].hidden, selected === 'message');
+        assert.equal(fields['message-source'].hidden, selected === 'file');
+        assert.equal(fields.file.files[0], selectedFile, 'the selected file is preserved');
+        assert.equal(fields.message.value, message, 'the message draft is preserved');
+        assert.equal(fields.password.value, password);
+        assert.equal(fields.password_repeated.value, password);
+        assert.equal(encryptor.reads, 0);
+        assert.equal(encryptor.derivations.length, 0);
+        assert.equal(encryptor.downloads.length, 0);
+    }
+});
+
+test('submitting after a source change encrypts only the selected content', async () => {
+    const message = 'Encrypt this message, not the selected file. 🔐';
+    const encryptor = page(source, password, password, { message });
+    for (const [attempt, selected] of ['message', 'file', 'message'].entries()) {
+        encryptor.selectSource(selected);
+        const previousReads = encryptor.reads;
+        await encryptor.run('submit');
+        assert.equal(encryptor.reads - previousReads, selected === 'file' ? 1 : 0);
+        assert.equal(encryptor.downloads.length, attempt + 1);
+        const decryptor = page(new TextDecoder().decode(encryptor.downloads[attempt][1]));
+        await decryptor.run('submit');
+        if (selected === 'message') {
+            assert.equal(decryptor.fields['decrypted-message'].textContent, message);
+            assert.equal(decryptor.fields['decrypted-message'].hidden, false);
+            assert.equal(decryptor.downloads.length, 0);
+        } else {
+            assertRecovered(decryptor);
+            assert.equal(decryptor.fields['decrypted-message'].hidden, true);
+        }
+    }
+});
+
+test('form reset restores the file source after native control values are reset', async () => {
+    const encryptor = page(source, password, password, { message: 'Discard this draft' });
+    const { fields, form } = encryptor;
+    encryptor.selectSource('message');
+    assert.equal(fields['file-source'].hidden, true);
+    assert.equal(fields['message-source'].hidden, false);
+
+    form.dispatch('reset');
+    // The browser restores defaults after the reset event, without radio change events.
+    fields['source-file'].checked = true;
+    fields['source-message'].checked = false;
+    fields.file.files = [];
+    fields.message.value = '';
+    fields.password.value = '';
+    fields.password_repeated.value = '';
+    await settle();
+    assert.deepEqual(encryptor.timerErrors, []);
+    assert.equal(fields['file-source'].hidden, false);
+    assert.equal(fields['message-source'].hidden, true);
+    assert.equal(encryptor.reads, 0);
+    assert.equal(encryptor.derivations.length, 0);
+    assert.equal(encryptor.downloads.length, 0);
+
+    fields.password.value = password;
+    fields.password_repeated.value = password;
+    await encryptor.run('submit');
+    assert.equal(encryptor.status.textContent, 'Select a file first.');
+    assert.equal(encryptor.reads, 0);
+    assert.equal(encryptor.derivations.length, 0);
+    assert.equal(encryptor.downloads.length, 0);
 });
 
 test('text messages display literally without downloading and clear on a failed retry', async () => {
