@@ -471,8 +471,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             }, DOWNLOAD_CLEANUP_DELAY_MS);
         }
 
+        // Invalidate asynchronous sharing feedback whenever a newer status is shown.
+        let statusRevision = 0;
+
         // tone: 'error' (default) or 'info' for progress and success messages.
         function setStatus(message, tone) {
+            statusRevision++;
             const status = document.getElementById('encrypt-status');
             status.textContent = message;
             status.dataset.tone = tone || 'error';
@@ -501,10 +505,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         function shareResult() {
             const result = pendingResult;
             if (!result) return;
+            const revision = statusRevision;
             // Share within the click itself: the Encrypt click's user activation is gone after key derivation.
             window.navigator.share({ files: [result.file], title: 'MonoSafe encrypted file' })
-                .then(() => setStatus('Shared: ' + result.name, 'info'))
+                .then(() => {
+                    if (statusRevision === revision) setStatus('Shared: ' + result.name, 'info');
+                })
                 .catch(e => {
+                    if (statusRevision !== revision) return;
                     // Dismissing the share sheet is not a failure.
                     if (e && e.name === 'AbortError') return;
                     setStatus('Sharing failed: ' + ((e && (e.message || e.name)) || e) + '. Use Download instead.');

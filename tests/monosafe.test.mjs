@@ -117,16 +117,23 @@ function page(html, secret = password, repeated = secret, options = {}) {
                 randomValues.push(Array.from(result));
                 return result;
             },
+            // Hooks can delay or reject browser API calls; successful calls still use real WebCrypto.
             subtle: new Proxy(webcrypto.subtle, {
                 get(target, key) {
-                    if (key === 'deriveKey') return (...args) => {
+                    if (key === 'deriveKey') return async (...args) => {
                         derivations.push(args[0]);
                         derivationStatuses.push(status.textContent);
                         keyAlgorithms.push(args[2]);
+                        await options.beforeCrypto?.(key);
                         return target.deriveKey(...args);
                     };
-                    if (key === 'encrypt' || key === 'decrypt') return (...args) => {
+                    if (key === 'encrypt' || key === 'decrypt') return async (...args) => {
                         operations.push(args[0]);
+                        await options.beforeCrypto?.(key);
+                        return target[key](...args);
+                    };
+                    if (key === 'importKey') return async (...args) => {
+                        await options.beforeCrypto?.(key);
                         return target[key](...args);
                     };
                     return target[key].bind(target);
@@ -158,13 +165,21 @@ function page(html, secret = password, repeated = secret, options = {}) {
             abort() { this.error = null; }
             readAsArrayBuffer() {
                 reads++;
-                if (Object.hasOwn(options, 'readError')) {
-                    this.error = options.readError;
-                    this.onerror();
-                    return;
-                }
-                this.result = (options.bytes || bytes).buffer;
-                this.onload();
+                const complete = () => {
+                    if (Object.hasOwn(options, 'readError')) {
+                        this.error = options.readError;
+                        this.onerror();
+                        return;
+                    }
+                    this.result = (options.bytes || bytes).buffer;
+                    this.onload();
+                };
+                if (options.beforeRead) {
+                    Promise.resolve().then(options.beforeRead).then(complete, error => {
+                        this.error = error;
+                        this.onerror();
+                    });
+                } else complete();
             }
         }
     });
@@ -400,6 +415,128 @@ test('file-read failures preserve diagnostics and restore the encrypt button', a
     }
 });
 
+for (const outcome of ['success', 'failure']) {
+    test(`a delayed file read keeps encryption busy until ${outcome}`, async () => {
+        const started = Promise.withResolvers();
+        const completion = Promise.withResolvers();
+        let delay = true;
+        const encryptor = page(source, password, password, {
+            beforeRead: () => {
+                if (!delay) return;
+                started.resolve();
+                return completion.promise;
+            }
+        });
+        const running = encryptor.run('submit');
+        await started.promise;
+        try {
+            assert.equal(encryptor.button.disabled, true);
+            assert.equal(encryptor.button.value, 'Encrypt');
+            assert.match(encryptor.status.textContent, /^Encrypting/);
+            assert.equal(encryptor.status.dataset.tone, 'info');
+            assert.equal(encryptor.derivations.length, 0);
+            assert.equal(encryptor.downloads.length, 0);
+            if (outcome === 'failure') completion.reject(new DOMException('Delayed read failed', 'NotReadableError'));
+        } finally {
+            completion.resolve();
+            await running;
+        }
+        assert.equal(encryptor.button.disabled, false);
+        if (outcome === 'failure') {
+            assert.equal(encryptor.status.textContent, 'Encryption failed: Delayed read failed');
+            assert.equal(encryptor.status.dataset.tone, 'error');
+            assert.equal(encryptor.downloads.length, 0);
+            delay = false;
+            await encryptor.run('submit');
+        }
+        assert.equal(encryptor.downloads.length, 1);
+        const decryptor = page(new TextDecoder().decode(encryptor.downloads[0][1]));
+        await decryptor.run('submit');
+        assertRecovered(decryptor);
+    });
+}
+
+for (const direction of ['encrypt', 'decrypt']) {
+    for (const stage of ['importKey', 'deriveKey', direction]) {
+        test(`${direction} recovers from a delayed ${stage} rejection without exposing stale results`, async () => {
+            const message = 'A private message 🔐';
+            const html = direction === 'encrypt' ? source : await artifact({ source: 'message', message });
+            const started = Promise.withResolvers();
+            const completion = Promise.withResolvers();
+            const sharing = sharingNavigator();
+            let fail = false;
+            const instance = page(html, password, password, {
+                window: { navigator: sharing.navigator },
+                beforeCrypto: method => {
+                    if (!fail || method !== stage) return;
+                    started.resolve();
+                    return completion.promise;
+                }
+            });
+            await instance.run('submit');
+            if (direction === 'encrypt') assert.equal(instance.fields['encrypt-result'].hidden, false);
+            else assert.equal(instance.fields['decrypted-message'].textContent, message);
+            fail = true;
+            const running = instance.run('submit');
+            await started.promise;
+            try {
+                assert.equal(instance.button.disabled, true);
+                assert.equal(instance.button.value, direction === 'encrypt' ? 'Encrypt' : 'Decrypt');
+                assert.match(instance.status.textContent, /^(Encrypting|Decrypting)/);
+                assert.equal(instance.status.dataset.tone, 'info');
+                assert.equal(instance.downloads.length, 0);
+                if (direction === 'encrypt') {
+                    assert.equal(instance.fields['encrypt-result'].hidden, true);
+                    instance.fields['save-button'].dispatch('click');
+                    instance.fields['share-button'].dispatch('click');
+                    assert.equal(instance.downloads.length, 0);
+                    assert.equal(sharing.shares.length, 0);
+                } else {
+                    assert.equal(instance.fields['decrypted-message'].textContent, '');
+                    assert.equal(instance.fields['decrypted-message'].hidden, true);
+                }
+                completion.reject(new DOMException('Injected ' + stage + ' failure', 'OperationError'));
+            } finally {
+                completion.resolve();
+                await running;
+            }
+            assert.equal(instance.button.disabled, false);
+            assert.equal(instance.status.textContent, direction === 'encrypt'
+                ? 'Encryption failed: Injected ' + stage + ' failure'
+                : 'Decryption failed: Wrong password or corrupted file.');
+            assert.equal(instance.status.dataset.tone, 'error');
+            assert.equal(instance.downloads.length, 0);
+            if (direction === 'encrypt') {
+                assert.equal(instance.fields['encrypt-result'].hidden, true);
+                instance.fields['save-button'].dispatch('click');
+                instance.fields['share-button'].dispatch('click');
+                assert.equal(instance.downloads.length, 0);
+                assert.equal(sharing.shares.length, 0);
+            } else {
+                assert.equal(instance.fields['decrypted-message'].textContent, '');
+                assert.equal(instance.fields['decrypted-message'].hidden, true);
+            }
+
+            fail = false;
+            await instance.run('submit');
+            assert.equal(instance.status.dataset.tone, 'info');
+            if (direction === 'encrypt') {
+                assert.equal(instance.fields['encrypt-result'].hidden, false);
+                instance.fields['save-button'].dispatch('click');
+                assert.equal(instance.downloads.length, 1);
+                assert.notEqual(instance.downloads[0][0], sharing.checks[0].files[0].name);
+                const recovered = page(new TextDecoder().decode(instance.downloads[0][1]));
+                await recovered.run('submit');
+                assertRecovered(recovered);
+            } else {
+                assert.equal(instance.status.textContent, 'Message decrypted.');
+                assert.equal(instance.fields['decrypted-message'].hidden, false);
+                assert.equal(instance.fields['decrypted-message'].textContent, message);
+            }
+        });
+    }
+}
+
 test('both encryption password inputs are required', () => {
     for (const id of ['password', 'password_repeated']) {
         assert.match(source.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))[0], /\brequired\b/);
@@ -560,6 +697,108 @@ test('dismissing the share sheet is silent; other share failures point to Downlo
     assert.equal(failing.status.dataset.tone, 'error');
     assert.equal(failing.fields['encrypt-result'].hidden, false);
 });
+
+for (const outcome of ['success', 'failure']) {
+    test(`a late share ${outcome} cannot replace a newer encryption result`, async () => {
+        const completion = Promise.withResolvers();
+        const sharing = sharingNavigator({ share: () => completion.promise });
+        const encryptor = page(source, password, password, { window: { navigator: sharing.navigator } });
+        await encryptor.run('submit');
+        encryptor.fields['share-button'].dispatch('click');
+        await encryptor.run('submit');
+        const status = encryptor.status.textContent;
+        const currentFile = sharing.checks[1].files[0];
+        assert.notEqual(sharing.shares[0].files[0], currentFile);
+
+        if (outcome === 'success') completion.resolve();
+        else completion.reject(new DOMException('Permission denied', 'NotAllowedError'));
+        await settle();
+
+        assert.equal(encryptor.status.textContent, status);
+        assert.equal(encryptor.status.dataset.tone, 'info');
+        assert.equal(encryptor.fields['encrypt-result'].hidden, false);
+        encryptor.fields['save-button'].dispatch('click');
+        assert.equal(encryptor.downloads[0][0], currentFile.name);
+    });
+}
+
+for (const outcome of ['success', 'failure']) {
+    test(`a late share ${outcome} cannot replace a newer download status`, async () => {
+        const completion = Promise.withResolvers();
+        const sharing = sharingNavigator({ share: () => completion.promise });
+        const encryptor = page(source, password, password, { window: { navigator: sharing.navigator } });
+        await encryptor.run('submit');
+        encryptor.fields['share-button'].dispatch('click');
+        encryptor.fields['save-button'].dispatch('click');
+        const status = 'Download started: ' + encryptor.downloads[0][0];
+        assert.equal(encryptor.status.textContent, status);
+
+        if (outcome === 'success') completion.resolve();
+        else completion.reject(new DOMException('Permission denied', 'NotAllowedError'));
+        await settle();
+
+        assert.equal(encryptor.status.textContent, status);
+        assert.equal(encryptor.status.dataset.tone, 'info');
+        assert.equal(encryptor.downloads.length, 1);
+    });
+}
+
+for (const outcome of ['success', 'failure']) {
+    for (const state of ['pending read', 'read failure', 'validation failure']) {
+        test(`a late share ${outcome} preserves a newer ${state} and cannot restore old actions`, async () => {
+            const share = Promise.withResolvers();
+            const started = Promise.withResolvers();
+            const read = Promise.withResolvers();
+            const sharing = sharingNavigator({ share: () => share.promise });
+            let delay = false;
+            const encryptor = page(source, password, password, {
+                window: { navigator: sharing.navigator },
+                beforeRead: () => {
+                    if (!delay) return;
+                    started.resolve();
+                    return read.promise;
+                }
+            });
+            await encryptor.run('submit');
+            encryptor.fields['share-button'].dispatch('click');
+            delay = true;
+            if (state === 'validation failure') encryptor.fields.password_repeated.value = 'different';
+            const running = encryptor.run('submit');
+            try {
+                if (state === 'validation failure') await running;
+                else {
+                    await started.promise;
+                    if (state === 'read failure') {
+                        read.reject(new DOMException('Input unavailable', 'NotReadableError'));
+                        await running;
+                    }
+                }
+                const expected = {
+                    'pending read': 'Encrypting… This may take a few seconds.',
+                    'read failure': 'Encryption failed: Input unavailable',
+                    'validation failure': 'Passwords must match.'
+                }[state];
+                assert.equal(encryptor.status.textContent, expected);
+                if (outcome === 'success') share.resolve();
+                else share.reject(new DOMException('Permission denied', 'NotAllowedError'));
+                await settle();
+
+                assert.equal(encryptor.status.textContent, expected);
+                assert.equal(encryptor.status.dataset.tone, state === 'pending read' ? 'info' : 'error');
+                assert.equal(encryptor.button.disabled, state === 'pending read');
+                assert.equal(encryptor.fields['encrypt-result'].hidden, true);
+                encryptor.fields['save-button'].dispatch('click');
+                encryptor.fields['share-button'].dispatch('click');
+                assert.equal(encryptor.downloads.length, 0);
+                assert.equal(sharing.shares.length, 1);
+            } finally {
+                share.resolve();
+                read.resolve();
+                await running;
+            }
+        });
+    }
+}
 
 test('Download saves the same container that Share offers', async () => {
     const sharing = sharingNavigator();
