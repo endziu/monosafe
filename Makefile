@@ -10,7 +10,7 @@ deploy: build
 	surge dist/ https://monosafe.surge.sh
 
 test:
-	node --test tests/monosafe.test.mjs
+	node --test tests/*.test.mjs
 
 clear:
 	rm -f dist/index.html dist/monosafe.html dist/CNAME

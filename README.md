@@ -33,11 +33,22 @@ The encrypted file is self-contained: whoever receives it needs nothing but a br
 
 ## Development
 
+Use Node.js 24 or newer and GNU Make in a Unix-like environment. The tests
+use Node's built-in test runner; no npm dependencies are needed.
+
 ```
-make test     # run the tests
+make test     # run application tests and isolated build checks
 make build    # build the dist/ folder
-make deploy   # publish with surge
+make deploy   # publish with surge (requires the Surge CLI)
 ```
+
+GitHub Actions runs `make test` on Node.js 24 and 26 for pull requests and
+pushes to `main`. Build tests verify both HTML copies and `CNAME`, including
+replacement of stale output, in temporary directories without touching your
+local `dist/`.
+
+For keyboard and screen-reader testing, also follow the
+[manual accessibility checks](tests/accessibility-manual.md).
 
 ## Credits
 
