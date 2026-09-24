@@ -71,6 +71,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
         data: { textContent: html.match(/<script id="data"[^>]*>([\s\S]*?)<\/script>/)?.[1] }
     };
     const downloads = [];
+    const randomValues = [];
     const derivations = [];
     const derivationStatuses = [];
     const keyAlgorithms = [];
@@ -111,7 +112,11 @@ function page(html, secret = password, repeated = secret, options = {}) {
             },
             revokeObjectURL: url => urls.revoked.push(url)
         }, crypto: {
-            getRandomValues: array => webcrypto.getRandomValues(array),
+            getRandomValues: array => {
+                const result = webcrypto.getRandomValues(array);
+                randomValues.push(Array.from(result));
+                return result;
+            },
             subtle: new Proxy(webcrypto.subtle, {
                 get(target, key) {
                     if (key === 'deriveKey') return (...args) => {
@@ -169,7 +174,7 @@ function page(html, secret = password, repeated = secret, options = {}) {
     if (options.download !== 'native') context.download = (...args) => downloads.push(args);
     return {
         context, status, statuses, button, buttonLabel, observedButtonValues, fields, form, downloads, derivations, derivationStatuses,
-        keyAlgorithms, operations, timerErrors, timers, urls, anchors, body, get reads() { return reads; },
+        randomValues, keyAlgorithms, operations, timerErrors, timers, urls, anchors, body, get reads() { return reads; },
         async run(name) {
             if (name === 'submit') {
                 let prevented = false;
@@ -326,6 +331,35 @@ test('new artifacts use the fixed cryptographic profile and a 96-bit IV', async 
     for (const instance of [encryptor, decryptor]) {
         assertCryptoProfile(instance);
     }
+});
+
+test('each encryption uses a fresh salt and IV from WebCrypto randomness', async () => {
+    const encryptor = page(source);
+    const payloads = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const previousRandomCalls = encryptor.randomValues.length;
+        // Keep the password and plaintext identical, including across repeated submissions.
+        await encryptor.run('submit');
+        assert.equal(encryptor.downloads.length, attempt + 1);
+        const html = new TextDecoder().decode(encryptor.downloads[attempt][1]);
+        const payload = JSON.parse(page(html).fields.data.textContent);
+        const freshRandomValues = encryptor.randomValues.slice(previousRandomCalls);
+        for (const [field, length] of [['salt', 16], ['iv', 12]]) {
+            assert.equal(payload[field].length, length, `${field} has the required byte length`);
+            assert.ok(freshRandomValues.some(value =>
+                value.length === length && value.every((byte, index) => byte === payload[field][index])
+            ), `${field} comes from getRandomValues during this encryption`);
+        }
+        assert.deepEqual(Array.from(encryptor.derivations[attempt].salt), payload.salt,
+            'key derivation uses the serialized salt');
+        assert.deepEqual(Array.from(encryptor.operations[attempt].iv), payload.iv,
+            'encryption uses the serialized IV');
+        payloads.push(payload);
+    }
+    assert.notDeepEqual(payloads[0].salt, payloads[1].salt, 'repeated encryption gets a fresh salt');
+    assert.notDeepEqual(payloads[0].iv, payloads[1].iv, 'repeated encryption gets a fresh IV');
+    assert.notEqual(payloads[0].encrypted, payloads[1].encrypted,
+        'identical inputs produce different ciphertext');
 });
 
 function assertRecovered(decryptor, status = 'Download started: ' + filename) {
