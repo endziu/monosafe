@@ -5,6 +5,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "make build",
     "test": "make test",
     "test:browser": "playwright test"
   },
