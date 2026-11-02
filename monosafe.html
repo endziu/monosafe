@@ -208,6 +208,18 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         document.getElementById('help-button').addEventListener('click', () => helpDialog.showModal());
         document.getElementById('help-close').addEventListener('click', () => helpDialog.close());
 
+        // Show help once on first visit. Without usable storage, skip it rather than show it every time.
+        const HELP_SEEN_KEY = 'monosafe.helpSeen';
+        try {
+            const storage = window.localStorage;
+            if (!storage.getItem(HELP_SEEN_KEY)) {
+                storage.setItem(HELP_SEEN_KEY, '1');
+                helpDialog.showModal();
+            }
+        } catch (e) {
+            // Storage blocked or unavailable.
+        }
+
         // A lightweight complexity estimate, not a prediction of cracking time.
         function passwordStrength(password) {
             if (!password.length) return 'empty';

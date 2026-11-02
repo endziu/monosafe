@@ -15,10 +15,16 @@ const test = base.extend({
     }
 });
 
-test.beforeEach(async ({ context, page }) => {
+async function goOffline(context) {
     // WebKit's offline emulation also blocks file:// navigation. Block network requests instead.
     await context.route(/^https?:\/\//, route => route.abort('internetdisconnected'));
     await context.routeWebSocket(/.*/, socket => socket.close());
+}
+
+test.beforeEach(async ({ context, page }) => {
+    await goOffline(context);
+    // Skip the first-visit help so tests start on the form; the first visit is tested separately.
+    await context.addInitScript(() => localStorage.setItem('monosafe.helpSeen', '1'));
     await page.goto(creatorUrl);
 });
 
@@ -55,6 +61,24 @@ async function encryptAndOpen(page, testInfo) {
     await page.goto(pathToFileURL(path).href);
     await expect(page.getByRole('button', { name: 'Decrypt', exact: true })).toBeVisible();
 }
+
+test('help opens on the first visit only', async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+        await goOffline(context);
+        const page = await context.newPage();
+        await page.goto(creatorUrl);
+        const dialog = page.getByRole('dialog', { name: 'MonoSafe', exact: true });
+        await expect(dialog).toBeVisible();
+        await page.getByRole('button', { name: 'Close help', exact: true }).click();
+        await expect(dialog).toBeHidden();
+        await page.reload();
+        await expect(page.getByRole('button', { name: 'Encrypt', exact: true })).toBeVisible();
+        await expect(dialog).toBeHidden();
+    } finally {
+        await context.close();
+    }
+});
 
 test('Help and password visibility controls work from the keyboard without submitting', async ({ page }) => {
     const help = page.getByRole('button', { name: 'Help', exact: true });

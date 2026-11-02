@@ -95,6 +95,27 @@ test('the help icon opens a concise modal', () => {
     assert.equal(fields['help-dialog'].open, false);
 });
 
+test('help opens automatically on the first visit only', async () => {
+    const stored = new Map();
+    const localStorage = {
+        getItem: key => stored.get(key) ?? null,
+        setItem: (key, value) => stored.set(key, String(value))
+    };
+    const first = page(source, password, password, { window: { localStorage } });
+    assert.equal(first.fields['help-dialog'].open, true);
+    const second = page(source, password, password, { window: { localStorage } });
+    assert.equal(second.fields['help-dialog'].open, undefined);
+
+    const denied = () => { throw new DOMException('denied', 'SecurityError'); };
+    const withoutStorage = page(source, password, password, { window: { localStorage: { getItem: denied, setItem: denied } } });
+    assert.equal(withoutStorage.fields['help-dialog'].open, undefined);
+
+    const decryptor = page(await artifact(source), password, password, { window: { localStorage: {
+        getItem: () => null, setItem: () => assert.fail('decryptor must not record help state')
+    } } });
+    assert.equal(decryptor.fields['help-dialog'].open, undefined);
+});
+
 test('primary button text meets AA contrast in both stylesheets, including hover', async () => {
     function luminance(color) {
         const hex = color === 'white' ? 'ffffff' : color.replace('#', '');
